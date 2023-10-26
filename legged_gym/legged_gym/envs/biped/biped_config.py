@@ -25,7 +25,7 @@ class BipedCfg(LeggedRobotCfg):
         stiffness = {'Joint': 20.}  # [N*m/rad]
         damping = {'Joint': 0.5}  # [N*m*s/rad]
         # action scale: target angle = actionScale * action + defaultAngle
-        action_scale = 0.25
+        action_scale = 0.5
         # decimation: Number of control action updates @ sim DT per policy DT
         decimation = 4
 
@@ -43,21 +43,14 @@ class BipedCfg(LeggedRobotCfg):
         base_height_target = 0.6
 
         class scales(LeggedRobotCfg.rewards.scales):
-            termination = -0.0
-            tracking_lin_vel = 1.0
-            tracking_ang_vel = 0.5
-            lin_vel_z = -0.05
-            ang_vel_xy = -0.005
-            orientation = -0.
-            torques = -0.00001
-            dof_vel = -0.
-            dof_acc = -2.5e-7
-            base_height = -0.
-            feet_air_time = 1.0
-            collision = -1.
-            feet_stumble = -0.0
-            action_rate = -0.0001
-            stand_still = -0.
+            termination = -200.0
+            tracking_ang_vel = 1.0
+            torques = -5.e-6
+            lin_vel_z = -0.5
+            ang_vel_xy = -0.0
+            feet_air_time = 5.0
+            dof_pos_limits = -1.
+            no_fly = 0.25
 
 
 class BipedCfgPPO(LeggedRobotCfgPPO):

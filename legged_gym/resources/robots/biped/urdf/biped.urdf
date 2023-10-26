@@ -304,15 +304,15 @@
           rgba="0.79216 0.81961 0.93333 1" />
       </material>
     </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="../meshes/abad_right_link.STL" />
-      </geometry>
-    </collision>
+<!--    <collision>-->
+<!--      <origin-->
+<!--        xyz="0 0 0"-->
+<!--        rpy="0 0 0" />-->
+<!--      <geometry>-->
+<!--        <mesh-->
+<!--          filename="../meshes/abad_right_link.STL" />-->
+<!--      </geometry>-->
+<!--    </collision>-->
   </link>
   <joint
     name="abad_R_Joint"
@@ -362,15 +362,15 @@
           rgba="1 0.98039 0.6 1" />
       </material>
     </visual>
-<!--    <collision>-->
-<!--      <origin-->
-<!--        xyz="0 0 0"-->
-<!--        rpy="0 0 0" />-->
-<!--      <geometry>-->
-<!--        <mesh-->
-<!--          filename="../meshes/hip_right_link.STL" />-->
-<!--      </geometry>-->
-<!--    </collision>-->
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/hip_right_link.STL" />
+      </geometry>
+    </collision>
   </link>
   <joint
     name="hip_R_Joint"
