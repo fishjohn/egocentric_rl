@@ -36,7 +36,7 @@ class BipedCfg(LeggedRobotCfg):
         penalize_contacts_on = ["hip", "knee"]
         terminate_after_contacts_on = ['base_Link']
         flip_visual_attachments = False
-        self_collisions = 1  # 1 to disable, 0 to enable...bitwise filter
+        self_collisions = 0  # 1 to disable, 0 to enable...bitwise filter
 
     class rewards(LeggedRobotCfg.rewards):
         soft_dof_pos_limit = 0.9
