@@ -1,0 +1,10 @@
+isaacgym*
+.ipynb_checkpoints/
+.vscode/
+.idea*
+*img
+*.egg-info/
+*.egg-info/*
+*logs/
+*logs/*
+__pycache__/
