@@ -45,6 +45,7 @@ class BipedCfg(LeggedRobotCfg):
         class scales(LeggedRobotCfg.rewards.scales):
             termination = -200.0
             tracking_ang_vel = 1.0
+            orientation = -0.05
             torques = -5.e-6
             lin_vel_z = -0.5
             ang_vel_xy = -0.0
