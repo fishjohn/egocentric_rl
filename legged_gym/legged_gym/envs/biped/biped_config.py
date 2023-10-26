@@ -48,10 +48,16 @@ class BipedCfg(LeggedRobotCfg):
             orientation = -0.05
             torques = -5.e-6
             lin_vel_z = -0.5
-            ang_vel_xy = -0.0
             feet_air_time = 5.0
             dof_pos_limits = -1.
             no_fly = 0.25
+
+    # class commands( LeggedRobotCfg.commands ):
+    #     class ranges:
+    #         lin_vel_x = [-0.5, 0.5] # min max [m/s]
+    #         lin_vel_y = [-0.0, 0.0]   # min max [m/s]
+    #         ang_vel_yaw = [-0.0, 0.0]    # min max [rad/s]
+    #         heading = [-0, 0]
 
 
 class BipedCfgPPO(LeggedRobotCfgPPO):
