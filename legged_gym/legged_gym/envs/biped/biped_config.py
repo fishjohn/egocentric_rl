@@ -3,9 +3,13 @@ from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobot
 
 class BipedCfg(LeggedRobotCfg):
     class env(LeggedRobotCfg.env):
-        num_envs = 4096
+        num_envs = 8192
         num_observations = 217
         num_actions = 6
+
+    # class terrain(LeggedRobotCfg.terrain):
+    #     mesh_type = 'plane'
+    #     measure_heights = False
 
     class init_state(LeggedRobotCfg.init_state):
         pos = [0.0, 0.0, 0.65]  # x,y,z [m]
@@ -43,7 +47,6 @@ class BipedCfg(LeggedRobotCfg):
         base_height_target = 0.6
 
         class scales(LeggedRobotCfg.rewards.scales):
-            termination = -200.0
             tracking_ang_vel = 1.0
             orientation = -0.05
             torques = -5.e-6
@@ -51,19 +54,21 @@ class BipedCfg(LeggedRobotCfg):
             feet_air_time = 5.0
             dof_pos_limits = -1.
             no_fly = 0.25
+            feet_edge = -1.0
 
-    # class commands( LeggedRobotCfg.commands ):
-    #     class ranges:
-    #         lin_vel_x = [-0.5, 0.5] # min max [m/s]
-    #         lin_vel_y = [-0.0, 0.0]   # min max [m/s]
-    #         ang_vel_yaw = [-0.0, 0.0]    # min max [rad/s]
-    #         heading = [-0, 0]
+    class commands(LeggedRobotCfg.commands):
+        class ranges:
+            lin_vel_x = [-0.6, 0.6]  # min max [m/s]
+            lin_vel_y = [-0.5, 0.5]  # min max [m/s]
+            ang_vel_yaw = [-1.0, 1.0]  # min max [rad/s]
+            heading = [-0, 0]
 
 
 class BipedCfgPPO(LeggedRobotCfgPPO):
     class runner(LeggedRobotCfgPPO.runner):
         run_name = ''
         experiment_name = 'biped'
+        max_iterations = 3000  # number of policy updates
 
     class algorithm(LeggedRobotCfgPPO.algorithm):
         entropy_coef = 0.01
