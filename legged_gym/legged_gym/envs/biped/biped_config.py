@@ -4,10 +4,22 @@ from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobot
 class BipedCfg(LeggedRobotCfg):
     class env(LeggedRobotCfg.env):
         num_envs = 8192
-        num_observations = 217
+        n_scan = 187
+        n_priv = 3 + 3 + 3
+        n_priv_latent = 1 + 3 + 1 + 6 + 6  # [rand_mass, rand_com, friction_coeffs, motor_strength_kps, motor_strength_kds]
+        n_proprio = 3 + 3 + 3 + 6 + 6 + 6 + 2
+        history_len = 10
+
+        num_observations = n_proprio + n_scan + n_priv + n_priv_latent + history_len * n_proprio
+        num_privileged_obs = None  # if not None a priviledge_obs_buf will be returned by step() (critic obs for assymetric training). None is returned otherwise
         num_actions = 6
 
     # class terrain(LeggedRobotCfg.terrain):
+    #     measure_heights = True
+    #     measured_points_x = [-0.45, -0.3, -0.15, 0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1.05,
+    #                          1.2]  # 1mx1.6m rectangle (without center line)
+    #     measured_points_y = [-0.75, -0.6, -0.45, -0.3, -0.15, 0., 0.15, 0.3, 0.45, 0.6, 0.75]
+
     #     mesh_type = 'plane'
     #     measure_heights = False
 

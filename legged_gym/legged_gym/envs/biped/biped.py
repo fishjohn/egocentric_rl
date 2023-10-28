@@ -5,9 +5,13 @@ import os
 from isaacgym.torch_utils import *
 from isaacgym import gymtorch, gymapi, gymutil
 
+from legged_gym import LEGGED_GYM_ROOT_DIR
+
 import torch
 from typing import Tuple, Dict
 from legged_gym.envs import LeggedRobot
+
+from tqdm import tqdm
 
 
 class Biped(LeggedRobot):
@@ -15,6 +19,139 @@ class Biped(LeggedRobot):
         super()._init_buffers()
         rigid_body_state_tensor = self.gym.acquire_rigid_body_state_tensor(self.sim)
         self.rigid_body_states = gymtorch.wrap_tensor(rigid_body_state_tensor).view(self.num_envs, -1, 13)
+        str_rng = self.cfg.domain_rand.motor_strength_range
+        self.motor_strength = (str_rng[1] - str_rng[0]) * torch.rand(2, self.num_envs, self.num_actions,
+                                                                     dtype=torch.float, device=self.device,
+                                                                     requires_grad=False) + str_rng[0]
+
+        if self.cfg.env.history_encoding:
+            self.obs_history_buf = torch.zeros(self.num_envs, self.cfg.env.history_len, self.cfg.env.n_proprio,
+                                               device=self.device, dtype=torch.float)
+        self.contact_buf = torch.zeros(self.num_envs, self.cfg.env.contact_buf_len, 2, device=self.device,
+                                       dtype=torch.float)
+
+    def _create_envs(self):
+        """ Creates environments:
+             1. loads the robot URDF/MJCF asset,
+             2. For each environment
+                2.1 creates the environment,
+                2.2 calls DOF and Rigid shape properties callbacks,
+                2.3 create actor with these properties and add them to the env
+             3. Store indices of different bodies of the robot
+        """
+        asset_path = self.cfg.asset.file.format(LEGGED_GYM_ROOT_DIR=LEGGED_GYM_ROOT_DIR)
+        asset_root = os.path.dirname(asset_path)
+        asset_file = os.path.basename(asset_path)
+
+        asset_options = gymapi.AssetOptions()
+        asset_options.default_dof_drive_mode = self.cfg.asset.default_dof_drive_mode
+        asset_options.collapse_fixed_joints = self.cfg.asset.collapse_fixed_joints
+        asset_options.replace_cylinder_with_capsule = self.cfg.asset.replace_cylinder_with_capsule
+        asset_options.flip_visual_attachments = self.cfg.asset.flip_visual_attachments
+        asset_options.fix_base_link = self.cfg.asset.fix_base_link
+        asset_options.density = self.cfg.asset.density
+        asset_options.angular_damping = self.cfg.asset.angular_damping
+        asset_options.linear_damping = self.cfg.asset.linear_damping
+        asset_options.max_angular_velocity = self.cfg.asset.max_angular_velocity
+        asset_options.max_linear_velocity = self.cfg.asset.max_linear_velocity
+        asset_options.armature = self.cfg.asset.armature
+        asset_options.thickness = self.cfg.asset.thickness
+        asset_options.disable_gravity = self.cfg.asset.disable_gravity
+
+        robot_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
+        self.num_dof = self.gym.get_asset_dof_count(robot_asset)
+        self.num_bodies = self.gym.get_asset_rigid_body_count(robot_asset)
+        dof_props_asset = self.gym.get_asset_dof_properties(robot_asset)
+        rigid_shape_props_asset = self.gym.get_asset_rigid_shape_properties(robot_asset)
+
+        # save body names from the asset
+        body_names = self.gym.get_asset_rigid_body_names(robot_asset)
+        self.dof_names = self.gym.get_asset_dof_names(robot_asset)
+        self.num_bodies = len(body_names)
+        self.num_dofs = len(self.dof_names)
+        feet_names = [s for s in body_names if self.cfg.asset.foot_name in s]
+
+        for s in ["FR_foot", "FL_foot", "RR_foot", "RL_foot"]:
+            feet_idx = self.gym.find_asset_rigid_body_index(robot_asset, s)
+            sensor_pose = gymapi.Transform(gymapi.Vec3(0.0, 0.0, 0.0))
+            self.gym.create_asset_force_sensor(robot_asset, feet_idx, sensor_pose)
+
+        penalized_contact_names = []
+        for name in self.cfg.asset.penalize_contacts_on:
+            penalized_contact_names.extend([s for s in body_names if name in s])
+        termination_contact_names = []
+        for name in self.cfg.asset.terminate_after_contacts_on:
+            termination_contact_names.extend([s for s in body_names if name in s])
+
+        base_init_state_list = self.cfg.init_state.pos + self.cfg.init_state.rot + self.cfg.init_state.lin_vel + self.cfg.init_state.ang_vel
+        self.base_init_state = to_torch(base_init_state_list, device=self.device, requires_grad=False)
+        start_pose = gymapi.Transform()
+        start_pose.p = gymapi.Vec3(*self.base_init_state[:3])
+
+        self._get_env_origins()
+        env_lower = gymapi.Vec3(0., 0., 0.)
+        env_upper = gymapi.Vec3(0., 0., 0.)
+        self.actor_handles = []
+        self.envs = []
+        self.cam_handles = []
+        self.cam_tensors = []
+        self.mass_params_tensor = torch.zeros(self.num_envs, 4, dtype=torch.float, device=self.device,
+                                              requires_grad=False)
+
+        print("Creating env...")
+        for i in tqdm(range(self.num_envs)):
+            # create env instance
+            env_handle = self.gym.create_env(self.sim, env_lower, env_upper, int(np.sqrt(self.num_envs)))
+            pos = self.env_origins[i].clone()
+            start_pose.p = gymapi.Vec3(*(pos + self.base_init_state[:3]))
+
+            rigid_shape_props = self._process_rigid_shape_props(rigid_shape_props_asset, i)
+            self.gym.set_asset_rigid_shape_properties(robot_asset, rigid_shape_props)
+            anymal_handle = self.gym.create_actor(env_handle, robot_asset, start_pose, "anymal", i,
+                                                  self.cfg.asset.self_collisions, 0)
+            dof_props = self._process_dof_props(dof_props_asset, i)
+            self.gym.set_actor_dof_properties(env_handle, anymal_handle, dof_props)
+            body_props = self.gym.get_actor_rigid_body_properties(env_handle, anymal_handle)
+            body_props, mass_params = self._process_rigid_body_props(body_props, i)
+            self.gym.set_actor_rigid_body_properties(env_handle, anymal_handle, body_props, recomputeInertia=True)
+            self.envs.append(env_handle)
+            self.actor_handles.append(anymal_handle)
+
+            self.mass_params_tensor[i, :] = torch.from_numpy(mass_params).to(self.device).to(torch.float)
+        if self.cfg.domain_rand.randomize_friction:
+            self.friction_coeffs_tensor = self.friction_coeffs.to(self.device).to(torch.float).squeeze(-1)
+
+        self.feet_indices = torch.zeros(len(feet_names), dtype=torch.long, device=self.device, requires_grad=False)
+        for i in range(len(feet_names)):
+            self.feet_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0],
+                                                                         feet_names[i])
+
+        self.penalised_contact_indices = torch.zeros(len(penalized_contact_names), dtype=torch.long, device=self.device,
+                                                     requires_grad=False)
+        for i in range(len(penalized_contact_names)):
+            self.penalised_contact_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0],
+                                                                                      self.actor_handles[0],
+                                                                                      penalized_contact_names[i])
+
+        self.termination_contact_indices = torch.zeros(len(termination_contact_names), dtype=torch.long,
+                                                       device=self.device, requires_grad=False)
+        for i in range(len(termination_contact_names)):
+            self.termination_contact_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0],
+                                                                                        self.actor_handles[0],
+                                                                                        termination_contact_names[i])
+
+        hip_names = [s for s in self.dof_names if "abad" in s]
+        self.hip_indices = torch.zeros(len(hip_names), dtype=torch.long, device=self.device, requires_grad=False)
+        for i, name in enumerate(hip_names):
+            self.hip_indices[i] = self.dof_names.index(name)
+        thigh_names = [s for s in self.dof_names if "hip" in s]
+        self.thigh_indices = torch.zeros(len(thigh_names), dtype=torch.long, device=self.device, requires_grad=False)
+        for i, name in enumerate(thigh_names):
+            self.thigh_indices[i] = self.dof_names.index(name)
+        calf_names = [s for s in self.dof_names if "knee" in s]
+        self.calf_indices = torch.zeros(len(calf_names), dtype=torch.long, device=self.device, requires_grad=False)
+        for i, name in enumerate(calf_names):
+            self.calf_indices[i] = self.dof_names.index(name)
 
     def _create_trimesh(self):
         super()._create_trimesh()
@@ -22,6 +159,85 @@ class Biped(LeggedRobot):
             self.device)
         self.y_edge_mask = torch.tensor(self.terrain.y_edge_mask).view(self.terrain.tot_rows, self.terrain.tot_cols).to(
             self.device)
+
+    def compute_observations(self):
+        """
+        Computes observations
+        """
+        obs_buf = torch.cat((
+            self.base_ang_vel * self.obs_scales.ang_vel,
+            self.projected_gravity,
+            self.commands[:, :3] * self.commands_scale,
+            (self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,
+            self.dof_vel * self.obs_scales.dof_vel,
+            self.actions,
+            self.contact_filt.float() - 0.5,
+        ), dim=-1)
+        priv_explicit = torch.cat((self.base_lin_vel * self.obs_scales.lin_vel,
+                                   0 * self.base_lin_vel,
+                                   0 * self.base_lin_vel), dim=-1)
+        priv_latent = torch.cat((
+            self.mass_params_tensor,
+            self.friction_coeffs_tensor,
+            self.motor_strength[0] - 1,
+            self.motor_strength[1] - 1
+        ), dim=-1)
+        if self.cfg.terrain.measure_heights:
+            heights = torch.clip(self.root_states[:, 2].unsqueeze(1) - 0.3 - self.measured_heights, -1, 1.)
+            self.obs_buf = torch.cat(
+                [obs_buf, heights, priv_explicit, priv_latent, self.obs_history_buf.view(self.num_envs, -1)], dim=-1)
+        else:
+            self.obs_buf = torch.cat(
+                [obs_buf, priv_explicit, priv_latent, self.obs_history_buf.view(self.num_envs, -1)], dim=-1)
+        self.obs_history_buf = torch.where(
+            (self.episode_length_buf <= 1)[:, None, None],
+            torch.stack([obs_buf] * self.cfg.env.history_len, dim=1),
+            torch.cat([
+                self.obs_history_buf[:, 1:],
+                obs_buf.unsqueeze(1)
+            ], dim=1)
+        )
+
+        self.contact_buf = torch.where(
+            (self.episode_length_buf <= 1)[:, None, None],
+            torch.stack([self.contact_filt.float()] * self.cfg.env.contact_buf_len, dim=1),
+            torch.cat([
+                self.contact_buf[:, 1:],
+                self.contact_filt.float().unsqueeze(1)
+            ], dim=1)
+        )
+
+    def _compute_torques(self, actions):
+        """ Compute torques from actions.
+            Actions can be interpreted as position or velocity targets given to a PD controller, or directly as scaled torques.
+            [NOTE]: torques must have the same dimension as the number of DOFs, even if some DOFs are not actuated.
+
+        Args:
+            actions (torch.Tensor): Actions
+
+        Returns:
+            [torch.Tensor]: Torques sent to the simulation
+        """
+        # pd controller
+        actions_scaled = actions * self.cfg.control.action_scale
+        control_type = self.cfg.control.control_type
+        if control_type == "P":
+            if not self.cfg.domain_rand.randomize_motor:  # TODO add strength to gain directly
+                torques = self.p_gains * (
+                        actions_scaled + self.default_dof_pos - self.dof_pos) - self.d_gains * self.dof_vel
+            else:
+                torques = self.motor_strength[0] * self.p_gains * (
+                        actions_scaled + self.default_dof_pos - self.dof_pos) - self.motor_strength[
+                              1] * self.d_gains * self.dof_vel
+
+        elif control_type == "V":
+            torques = self.p_gains * (actions_scaled - self.dof_vel) - self.d_gains * (
+                    self.dof_vel - self.last_dof_vel) / self.sim_params.dt
+        elif control_type == "T":
+            torques = actions_scaled
+        else:
+            raise NameError(f"Unknown controller type: {control_type}")
+        return torch.clip(torques, -self.torque_limits, self.torque_limits)
 
     def post_physics_step(self):
         """ check terminations, compute observations and rewards
@@ -61,6 +277,23 @@ class Biped(LeggedRobot):
 
         if self.viewer and self.enable_viewer_sync and self.debug_viz:
             self._draw_debug_vis()
+
+    def _process_rigid_body_props(self, props, env_id):
+        # No need to use tensors as only called upon env creation
+        if self.cfg.domain_rand.randomize_base_mass:
+            rng_mass = self.cfg.domain_rand.added_mass_range
+            rand_mass = np.random.uniform(rng_mass[0], rng_mass[1], size=(1,))
+            props[0].mass += rand_mass
+        else:
+            rand_mass = np.zeros((1,))
+        if self.cfg.domain_rand.randomize_base_com:
+            rng_com = self.cfg.domain_rand.added_com_range
+            rand_com = np.random.uniform(rng_com[0], rng_com[1], size=(3,))
+            props[0].com += gymapi.Vec3(*rand_com)
+        else:
+            rand_com = np.zeros(3)
+        mass_params = np.concatenate([rand_mass, rand_com])
+        return props, mass_params
 
     def _reward_no_fly(self):
         contacts = self.contact_forces[:, self.feet_indices, 2] > 0.1

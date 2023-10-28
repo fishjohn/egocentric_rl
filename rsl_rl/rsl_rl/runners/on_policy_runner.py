@@ -37,8 +37,10 @@ from torch.utils.tensorboard import SummaryWriter
 import torch
 
 from rsl_rl.algorithms import PPO
-from rsl_rl.modules import ActorCritic, ActorCriticRecurrent
+from rsl_rl.modules import ActorCriticRMA, Estimator
 from rsl_rl.env import VecEnv
+
+from copy import copy, deepcopy
 
 
 class OnPolicyRunner:
@@ -52,21 +54,29 @@ class OnPolicyRunner:
         self.cfg = train_cfg["runner"]
         self.alg_cfg = train_cfg["algorithm"]
         self.policy_cfg = train_cfg["policy"]
+        self.estimator_cfg = train_cfg["estimator"]
         self.device = device
         self.env = env
-        if self.env.num_privileged_obs is not None:
-            num_critic_obs = self.env.num_privileged_obs
-        else:
-            num_critic_obs = self.env.num_obs
-        actor_critic_class = eval(self.cfg["policy_class_name"])  # ActorCritic
-        actor_critic: ActorCritic = actor_critic_class(self.env.num_obs,
-                                                       num_critic_obs,
-                                                       self.env.num_actions,
-                                                       **self.policy_cfg).to(self.device)
+
+        print("Using MLP and Priviliged Env encoder ActorCritic structure")
+        actor_critic: ActorCriticRMA = ActorCriticRMA(self.env.cfg.env.n_proprio,
+                                                      self.env.cfg.env.n_scan,
+                                                      self.env.num_obs,
+                                                      self.env.cfg.env.n_priv_latent,
+                                                      self.env.cfg.env.n_priv,
+                                                      self.env.cfg.env.history_len,
+                                                      self.env.num_actions,
+                                                      **self.policy_cfg).to(self.device)
+        estimator = Estimator(input_dim=env.cfg.env.n_proprio, output_dim=env.cfg.env.n_priv,
+                              hidden_dims=self.estimator_cfg["hidden_dims"]).to(self.device)
+
         alg_class = eval(self.cfg["algorithm_class_name"])  # PPO
-        self.alg: PPO = alg_class(actor_critic, device=self.device, **self.alg_cfg)
+        self.alg: PPO = alg_class(actor_critic,
+                                  estimator, self.estimator_cfg,
+                                  device=self.device, **self.alg_cfg)
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
         self.save_interval = self.cfg["save_interval"]
+        self.dagger_update_freq = self.alg_cfg["dagger_update_freq"]
 
         # init storage and model
         self.alg.init_storage(self.env.num_envs, self.num_steps_per_env, [self.env.num_obs],
@@ -82,6 +92,16 @@ class OnPolicyRunner:
         _, _ = self.env.reset()
 
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
+        mean_value_loss = 0.
+        mean_surrogate_loss = 0.
+        mean_estimator_loss = 0.
+        mean_disc_loss = 0.
+        mean_disc_acc = 0.
+        mean_hist_latent_loss = 0.
+        mean_priv_reg_loss = 0.
+        priv_reg_coef = 0.
+        entropy_coef = 0.
+
         # initialize writer
         if self.log_dir is not None and self.writer is None:
             self.writer = SummaryWriter(log_dir=self.log_dir, flush_secs=10)
@@ -92,26 +112,36 @@ class OnPolicyRunner:
         privileged_obs = self.env.get_privileged_observations()
         critic_obs = privileged_obs if privileged_obs is not None else obs
         obs, critic_obs = obs.to(self.device), critic_obs.to(self.device)
+        infos = {}
+        infos["depth"] = None
         self.alg.actor_critic.train()  # switch to train mode (for dropout for example)
 
         ep_infos = []
         rewbuffer = deque(maxlen=100)
         lenbuffer = deque(maxlen=100)
+        rew_explr_buffer = deque(maxlen=100)
+        rew_entropy_buffer = deque(maxlen=100)
         cur_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
         cur_episode_length = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+        cur_reward_explr_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+        cur_reward_entropy_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
 
         tot_iter = self.current_learning_iteration + num_learning_iterations
+        self.start_learning_iteration = copy(self.current_learning_iteration)
+
         for it in range(self.current_learning_iteration, tot_iter):
             start = time.time()
+            hist_encoding = (it % self.dagger_update_freq == 0)
+
             # Rollout
             with torch.inference_mode():
                 for i in range(self.num_steps_per_env):
-                    actions = self.alg.act(obs, critic_obs)
+                    actions = self.alg.act(obs, critic_obs, infos, hist_encoding)
                     obs, privileged_obs, rewards, dones, infos = self.env.step(actions)
                     critic_obs = privileged_obs if privileged_obs is not None else obs
                     obs, critic_obs, rewards, dones = obs.to(self.device), critic_obs.to(self.device), rewards.to(
                         self.device), dones.to(self.device)
-                    self.alg.process_env_step(rewards, dones, infos)
+                    total_rew = self.alg.process_env_step(rewards, dones, infos)
 
                     if self.log_dir is not None:
                         # Book keeping
@@ -119,11 +149,18 @@ class OnPolicyRunner:
                             ep_infos.append(infos['episode'])
                         cur_reward_sum += rewards
                         cur_episode_length += 1
+                        cur_reward_explr_sum += 0
+                        cur_reward_entropy_sum += 0
+
                         new_ids = (dones > 0).nonzero(as_tuple=False)
                         rewbuffer.extend(cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
                         lenbuffer.extend(cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
+                        rew_explr_buffer.extend(cur_reward_explr_sum[new_ids][:, 0].cpu().numpy().tolist())
+                        rew_entropy_buffer.extend(cur_reward_entropy_sum[new_ids][:, 0].cpu().numpy().tolist())
                         cur_reward_sum[new_ids] = 0
                         cur_episode_length[new_ids] = 0
+                        cur_reward_explr_sum[new_ids] = 0
+                        cur_reward_entropy_sum[new_ids] = 0
 
                 stop = time.time()
                 collection_time = stop - start
@@ -132,7 +169,11 @@ class OnPolicyRunner:
                 start = stop
                 self.alg.compute_returns(critic_obs)
 
-            mean_value_loss, mean_surrogate_loss = self.alg.update()
+            mean_value_loss, mean_surrogate_loss, mean_estimator_loss, mean_disc_loss, mean_disc_acc, mean_priv_reg_loss, priv_reg_coef = self.alg.update()
+            if hist_encoding:
+                print("Updating dagger...")
+                mean_hist_latent_loss = self.alg.update_dagger()
+
             stop = time.time()
             learn_time = stop - start
             if self.log_dir is not None:
@@ -168,6 +209,11 @@ class OnPolicyRunner:
 
         self.writer.add_scalar('Loss/value_function', locs['mean_value_loss'], locs['it'])
         self.writer.add_scalar('Loss/surrogate', locs['mean_surrogate_loss'], locs['it'])
+        self.writer.add_scalar('Loss/estimator', locs['mean_estimator_loss'], locs['it'])
+        self.writer.add_scalar('Loss/hist_latent_loss', locs['mean_hist_latent_loss'], locs['it'])
+        self.writer.add_scalar('Loss/priv_reg_loss', locs['mean_priv_reg_loss'], locs['it'])
+        self.writer.add_scalar('Loss/priv_ref_lambda', locs['priv_reg_coef'], locs['it'])
+        self.writer.add_scalar('Loss/entropy_coef', locs['entropy_coef'], locs['it'])
         self.writer.add_scalar('Loss/learning_rate', self.alg.learning_rate, locs['it'])
         self.writer.add_scalar('Policy/mean_noise_std', mean_std.item(), locs['it'])
         self.writer.add_scalar('Perf/total_fps', fps, locs['it'])
@@ -175,6 +221,8 @@ class OnPolicyRunner:
         self.writer.add_scalar('Perf/learning_time', locs['learn_time'], locs['it'])
         if len(locs['rewbuffer']) > 0:
             self.writer.add_scalar('Train/mean_reward', statistics.mean(locs['rewbuffer']), locs['it'])
+            self.writer.add_scalar('Train/mean_reward_explr', statistics.mean(locs['rew_explr_buffer']), locs['it'])
+            self.writer.add_scalar('Train/mean_reward_entropy', statistics.mean(locs['rew_entropy_buffer']), locs['it'])
             self.writer.add_scalar('Train/mean_episode_length', statistics.mean(locs['lenbuffer']), locs['it'])
             self.writer.add_scalar('Train/mean_reward/time', statistics.mean(locs['rewbuffer']), self.tot_time)
             self.writer.add_scalar('Train/mean_episode_length/time', statistics.mean(locs['lenbuffer']), self.tot_time)
@@ -214,19 +262,25 @@ class OnPolicyRunner:
         print(log_string)
 
     def save(self, path, infos=None):
-        torch.save({
+        state_dict = {
             'model_state_dict': self.alg.actor_critic.state_dict(),
+            'estimator_state_dict': self.alg.estimator.state_dict(),
             'optimizer_state_dict': self.alg.optimizer.state_dict(),
             'iter': self.current_learning_iteration,
             'infos': infos,
-        }, path)
+        }
+        torch.save(state_dict, path)
 
     def load(self, path, load_optimizer=True):
-        loaded_dict = torch.load(path)
+        print("*" * 80)
+        print("Loading model from {}...".format(path))
+        loaded_dict = torch.load(path, map_location=self.device)
         self.alg.actor_critic.load_state_dict(loaded_dict['model_state_dict'])
+        self.alg.estimator.load_state_dict(loaded_dict['estimator_state_dict'])
         if load_optimizer:
             self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
         self.current_learning_iteration = loaded_dict['iter']
+        print("*" * 80)
         return loaded_dict['infos']
 
     def get_inference_policy(self, device=None):
@@ -234,3 +288,15 @@ class OnPolicyRunner:
         if device is not None:
             self.alg.actor_critic.to(device)
         return self.alg.actor_critic.act_inference
+
+    def get_actor_critic(self, device=None):
+        self.alg.actor_critic.eval()  # switch to evaluation mode (dropout for example)
+        if device is not None:
+            self.alg.actor_critic.to(device)
+        return self.alg.actor_critic
+
+    def get_estimator_inference_policy(self, device=None):
+        self.alg.estimator.eval()  # switch to evaluation mode (dropout for example)
+        if device is not None:
+            self.alg.estimator.to(device)
+        return self.alg.estimator.inference

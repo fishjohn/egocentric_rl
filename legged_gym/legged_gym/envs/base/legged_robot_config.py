@@ -34,12 +34,19 @@ from .base_config import BaseConfig
 class LeggedRobotCfg(BaseConfig):
     class env:
         num_envs = 4096
+        n_scan = 132
+        n_priv = 3 + 3 + 3
+        n_priv_latent = 1 + 3 + 1 + 6 + 6  # [rand_mass, rand_com, friction_coeffs, motor_strength_kps, motor_strength_kds]
+        n_proprio = 3 + 3 + 3 + 6 + 6 + 6 + 2
+        history_len = 10
         num_observations = 235
         num_privileged_obs = None  # if not None a priviledge_obs_buf will be returned by step() (critic obs for assymetric training). None is returned otherwise
         num_actions = 12
         env_spacing = 3.  # not used with heightfields/trimeshes 
         send_timeouts = True  # send time out information to the algorithm
         episode_length_s = 20  # episode length in seconds
+        history_encoding = True
+        contact_buf_len = 100
 
     class terrain:
         mesh_type = 'trimesh'  # "heightfield" # none, plane, heightfield or trimesh
@@ -66,7 +73,7 @@ class LeggedRobotCfg(BaseConfig):
         terrain_proportions = [0.1, 0.1, 0.35, 0.25, 0.2]
         # trimesh only:
         slope_treshold = 0.75  # slopes above this threshold will be corrected to vertical surfaces
-        edge_width_thresh = 0.05 # define the edge width
+        edge_width_thresh = 0.05  # define the edge width
 
     class commands:
         curriculum = False
@@ -124,9 +131,13 @@ class LeggedRobotCfg(BaseConfig):
 
     class domain_rand:
         randomize_friction = True
-        friction_range = [0.5, 1.25]
-        randomize_base_mass = False
+        friction_range = [0.6, 2.]
+        randomize_base_mass = True
         added_mass_range = [-1., 1.]
+        randomize_base_com = True
+        added_com_range = [-0.2, 0.2]
+        randomize_motor = True
+        motor_strength_range = [0.8, 1.2]
         push_robots = True
         push_interval_s = 15
         max_push_vel_xy = 1.
@@ -212,9 +223,12 @@ class LeggedRobotCfgPPO(BaseConfig):
 
     class policy:
         init_noise_std = 1.0
+        scan_encoder_dims = [128, 64, 32]
         actor_hidden_dims = [512, 256, 128]
         critic_hidden_dims = [512, 256, 128]
+        priv_encoder_dims = [64, 20]
         activation = 'elu'  # can be elu, relu, selu, crelu, lrelu, tanh, sigmoid
+        tanh_encoder_output = False
         # only for 'ActorCriticRecurrent':
         # rnn_type = 'lstm'
         # rnn_hidden_size = 512
@@ -234,6 +248,18 @@ class LeggedRobotCfgPPO(BaseConfig):
         lam = 0.95
         desired_kl = 0.01
         max_grad_norm = 1.
+        # dagger params
+        dagger_update_freq = 20
+        priv_reg_coef_schedual = [0, 0.1, 2000, 3000]
+        priv_reg_coef_schedual_resume = [0, 0.1, 0, 1]
+
+    class estimator:
+        train_with_estimated_states = True
+        learning_rate = 1.e-4
+        hidden_dims = [128, 64]
+        priv_states_dim = LeggedRobotCfg.env.n_priv
+        num_prop = LeggedRobotCfg.env.n_proprio
+        num_scan = LeggedRobotCfg.env.n_scan
 
     class runner:
         policy_class_name = 'ActorCritic'
