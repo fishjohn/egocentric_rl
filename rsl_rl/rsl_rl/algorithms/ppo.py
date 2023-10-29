@@ -63,6 +63,7 @@ class PPO:
 
         self.device = device
 
+        self.kl_mean = 0
         self.desired_kl = desired_kl
         self.schedule = schedule
         self.learning_rate = learning_rate
@@ -204,6 +205,7 @@ class PPO:
                                 torch.square(old_sigma_batch) + torch.square(old_mu_batch - mu_batch)) / (
                                 2.0 * torch.square(sigma_batch)) - 0.5, axis=-1)
                     kl_mean = torch.mean(kl)
+                    self.kl_mean = kl_mean
 
                     if kl_mean > self.desired_kl * 2.0:
                         self.learning_rate = max(1e-5, self.learning_rate / 1.5)
