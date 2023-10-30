@@ -28,7 +28,7 @@
 #
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
-from legged_gym import LEGGED_GYM_ROOT_DIR
+from legged_gym import LEGGED_GYM_ROOT_DIR, WANDB_SAVE_DIR
 import os
 
 import isaacgym
@@ -40,6 +40,8 @@ import torch
 
 
 def play(args):
+    log_pth = WANDB_SAVE_DIR + "/logs/{}/".format(args.proj_name) + args.exptid
+
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
     # override some parameters for testing
     env_cfg.env.num_envs = min(env_cfg.env.num_envs, 50)
@@ -55,7 +57,8 @@ def play(args):
     obs = env.get_observations()
     # load policy
     train_cfg.runner.resume = True
-    ppo_runner, train_cfg = task_registry.make_alg_runner(env=env, name=args.task, args=args, train_cfg=train_cfg)
+    ppo_runner, train_cfg = task_registry.make_alg_runner(log_root=log_pth, env=env, name=args.task, args=args,
+                                                          train_cfg=train_cfg)
     policy = ppo_runner.get_inference_policy(device=env.device)
 
     # export policy as a jit module (used to run it from C++)

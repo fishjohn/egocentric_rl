@@ -36,11 +36,39 @@ import isaacgym
 from legged_gym.envs import *
 from legged_gym.utils import get_args, task_registry
 import torch
+import wandb
+
+from legged_gym import LEGGED_GYM_ENVS_DIR, WANDB_SAVE_DIR
+
+
+def setup_wandb(args):
+    log_pth = WANDB_SAVE_DIR + "/logs/{}/".format(args.proj_name) + args.exptid
+    try:
+        os.makedirs(log_pth, exist_ok=True)
+    except:
+        raise RuntimeError(f"Failed to create directory '{log_pth}'")
+    if args.debug:
+        mode = "disabled"
+        args.num_envs = 64
+    else:
+        mode = "online"
+
+    if args.no_wandb:
+        mode = "disabled"
+    wandb.init(project=args.proj_name, name=args.exptid, group=args.exptid[:3], mode=mode,
+               dir=os.path.join(WANDB_SAVE_DIR, "logs"))
+    wandb.save(LEGGED_GYM_ENVS_DIR + "/base/legged_robot_config.py", policy="now")
+    wandb.save(LEGGED_GYM_ENVS_DIR + "/base/legged_robot.py", policy="now")
+    wandb.save(LEGGED_GYM_ENVS_DIR + "/biped/biped.py", policy="now")
+    wandb.save(LEGGED_GYM_ENVS_DIR + "/biped/biped_config.py", policy="now")
+
+    return args, log_pth
 
 
 def train(args):
+    args, log_pth = setup_wandb(args)
     env, env_cfg = task_registry.make_env(name=args.task, args=args)
-    ppo_runner, train_cfg = task_registry.make_alg_runner(env=env, name=args.task, args=args)
+    ppo_runner, train_cfg = task_registry.make_alg_runner(env=env, name=args.task, args=args, log_root=log_pth)
     ppo_runner.learn(num_learning_iterations=train_cfg.runner.max_iterations, init_at_random_ep_len=True)
 
 

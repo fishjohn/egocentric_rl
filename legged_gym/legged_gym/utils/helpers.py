@@ -105,28 +105,24 @@ def parse_sim_params(args, cfg):
     return sim_params
 
 
-def get_load_path(root, load_run=-1, checkpoint=-1):
-    try:
-        runs = os.listdir(root)
-        # TODO sort by date to handle change of month
-        runs.sort()
-        if 'exported' in runs: runs.remove('exported')
-        last_run = os.path.join(root, runs[-1])
-    except:
-        raise ValueError("No runs in this directory: " + root)
-    if load_run == -1:
-        load_run = last_run
-    else:
-        load_run = os.path.join(root, load_run)
-
-    if checkpoint == -1:
-        models = [file for file in os.listdir(load_run) if 'model' in file]
+def get_load_path(root, load_run=-1, checkpoint=-1, model_name_include="model"):
+    if not os.path.isdir(root):  # use first 4 chars to mactch the run name
+        model_name_cand = os.path.basename(root)
+        model_parent = os.path.dirname(root)
+        model_names = os.listdir(model_parent)
+        model_names = [name for name in model_names if os.path.isdir(os.path.join(model_parent, name))]
+        for name in model_names:
+            if len(name) >= 6:
+                if name[:6] == model_name_cand:
+                    root = os.path.join(model_parent, name)
+    if checkpoint==-1:
+        models = [file for file in os.listdir(root) if model_name_include in file]
         models.sort(key=lambda m: '{0:0>15}'.format(m))
         model = models[-1]
     else:
         model = "model_{}.pt".format(checkpoint)
 
-    load_path = os.path.join(load_run, model)
+    load_path = os.path.join(root, model)
     return load_path
 
 
@@ -178,6 +174,10 @@ def get_args():
         {"name": "--seed", "type": int, "help": "Random seed. Overrides config file if provided."},
         {"name": "--max_iterations", "type": int,
          "help": "Maximum number of training iterations. Overrides config file if provided."},
+        {"name": "--exptid", "type": str, "help": "exptid"},
+        {"name": "--proj_name", "type": str, "default": "egocentric_rl", "help": "run folder name."},
+        {"name": "--no_wandb", "action": "store_true", "default": False, "help": "no wandb"},
+        {"name": "--debug", "action": "store_true", "default": False, "help": "Disable wandb logging"},
     ]
     # parse arguments
     args = gymutil.parse_arguments(
