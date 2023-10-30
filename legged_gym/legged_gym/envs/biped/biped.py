@@ -311,3 +311,16 @@ class Biped(LeggedRobot):
         self.feet_at_edge = self.contact_filt & (feet_at_x_edge | feet_at_y_edge)
         rew = (self.terrain_levels > 3) * torch.sum(self.feet_at_edge, dim=-1)
         return rew
+
+    def _reward_tracking_lin_vel(self):
+        # Reward tracking specified linear velocity command
+        error = self.commands[:, :2] - self.base_lin_vel[:, :2]
+        error *= 1. / (1. + torch.abs(self.commands[:, :2]))
+        error = torch.sum(torch.square(error), dim=1)
+        return torch.exp(-error / self.cfg.rewards.tracking_sigma)
+
+    def _reward_tracking_ang_vel(self):
+        # Reward tracking yaw angular velocity command
+        ang_vel_error = torch.square(
+            (self.commands[:, 2] - self.base_ang_vel[:, 2]) * 2 / torch.pi)
+        return torch.exp(-ang_vel_error / self.cfg.rewards.tracking_sigma)
