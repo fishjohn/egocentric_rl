@@ -35,6 +35,7 @@ import numpy as np
 import random
 from isaacgym import gymapi
 from isaacgym import gymutil
+import argparse
 
 from legged_gym import LEGGED_GYM_ROOT_DIR, LEGGED_GYM_ENVS_DIR
 
@@ -115,7 +116,7 @@ def get_load_path(root, load_run=-1, checkpoint=-1, model_name_include="model"):
             if len(name) >= 6:
                 if name[:6] == model_name_cand:
                     root = os.path.join(model_parent, name)
-    if checkpoint==-1:
+    if checkpoint == -1:
         models = [file for file in os.listdir(root) if model_name_include in file]
         models.sort(key=lambda m: '{0:0>15}'.format(m))
         model = models[-1]
@@ -129,6 +130,10 @@ def get_load_path(root, load_run=-1, checkpoint=-1, model_name_include="model"):
 def update_cfg_from_args(env_cfg, cfg_train, args):
     # seed
     if env_cfg is not None:
+        if args.use_camera:
+            env_cfg.depth.use_camera = args.use_camera
+            env_cfg.env.num_envs = env_cfg.depth.camera_num_envs
+
         # num envs
         if args.num_envs is not None:
             env_cfg.env.num_envs = args.num_envs
@@ -136,6 +141,8 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
         if args.seed is not None:
             cfg_train.seed = args.seed
         # alg runner parameters
+        if args.use_camera:
+            cfg_train.depth_encoder.if_depth = args.use_camera
         if args.max_iterations is not None:
             cfg_train.runner.max_iterations = args.max_iterations
         if args.resume:
@@ -169,18 +176,21 @@ def get_args():
         {"name": "--horovod", "action": "store_true", "default": False, "help": "Use horovod for multi-gpu training"},
         {"name": "--rl_device", "type": str, "default": "cuda:0",
          "help": 'Device used by the RL algorithm, (cpu, gpu, cuda:0, cuda:1 etc..)'},
+        {"name": "--device", "type": str, "default": "cuda:0", "help": 'Device for sim, rl, and graphics'},
         {"name": "--num_envs", "type": int,
          "help": "Number of environments to create. Overrides config file if provided."},
         {"name": "--seed", "type": int, "help": "Random seed. Overrides config file if provided."},
         {"name": "--max_iterations", "type": int,
          "help": "Maximum number of training iterations. Overrides config file if provided."},
         {"name": "--exptid", "type": str, "help": "exptid"},
+        {"name": "--resumeid", "type": str, "help": "exptid"},
         {"name": "--proj_name", "type": str, "default": "egocentric_rl", "help": "run folder name."},
         {"name": "--no_wandb", "action": "store_true", "default": False, "help": "no wandb"},
         {"name": "--debug", "action": "store_true", "default": False, "help": "Disable wandb logging"},
+        {"name": "--use_camera", "action": "store_true", "default": False, "help": "render camera for distillation"}
     ]
     # parse arguments
-    args = gymutil.parse_arguments(
+    args = parse_arguments(
         description="RL Policy",
         custom_parameters=custom_parameters)
 
@@ -232,3 +242,97 @@ class PolicyExporterLSTM(torch.nn.Module):
         self.to('cpu')
         traced_script_module = torch.jit.script(self)
         traced_script_module.save(path)
+
+def parse_device_str(device_str):
+    # defaults
+    device = 'cpu'
+    device_id = 0
+
+    if device_str == 'cpu' or device_str == 'cuda':
+        device = device_str
+        device_id = 0
+    else:
+        device_args = device_str.split(':')
+        assert len(device_args) == 2 and device_args[0] == 'cuda', f'Invalid device string "{device_str}"'
+        device, device_id_s = device_args
+        try:
+            device_id = int(device_id_s)
+        except ValueError:
+            raise ValueError(f'Invalid device string "{device_str}". Cannot parse "{device_id}"" as a valid device id')
+    return device, device_id
+
+def parse_arguments(description="Isaac Gym Example", headless=False, no_graphics=False, custom_parameters=[]):
+    parser = argparse.ArgumentParser(description=description)
+    if headless:
+        parser.add_argument('--headless', action='store_true', help='Run headless without creating a viewer window')
+    if no_graphics:
+        parser.add_argument('--nographics', action='store_true',
+                            help='Disable graphics context creation, no viewer window is created, and no headless rendering is available')
+    parser.add_argument('--sim_device', type=str, default="cuda:0", help='Physics Device in PyTorch-like syntax')
+    parser.add_argument('--pipeline', type=str, default="gpu", help='Tensor API pipeline (cpu/gpu)')
+    parser.add_argument('--graphics_device_id', type=int, default=0, help='Graphics Device ID')
+
+    physics_group = parser.add_mutually_exclusive_group()
+    physics_group.add_argument('--flex', action='store_true', help='Use FleX for physics')
+    physics_group.add_argument('--physx', action='store_true', help='Use PhysX for physics')
+
+    parser.add_argument('--num_threads', type=int, default=0, help='Number of cores used by PhysX')
+    parser.add_argument('--subscenes', type=int, default=0, help='Number of PhysX subscenes to simulate in parallel')
+    parser.add_argument('--slices', type=int, help='Number of client threads that process env slices')
+
+    for argument in custom_parameters:
+        if ("name" in argument) and ("type" in argument or "action" in argument):
+            help_str = ""
+            if "help" in argument:
+                help_str = argument["help"]
+
+            if "type" in argument:
+                if "default" in argument:
+                    parser.add_argument(argument["name"], type=argument["type"], default=argument["default"], help=help_str)
+                else:
+                    parser.add_argument(argument["name"], type=argument["type"], help=help_str)
+            elif "action" in argument:
+                parser.add_argument(argument["name"], action=argument["action"], help=help_str)
+
+        else:
+            print()
+            print("ERROR: command line argument name, type/action must be defined, argument not added to parser")
+            print("supported keys: name, type, default, action, help")
+            print()
+
+    args = parser.parse_args()
+
+    if args.device is not None:
+        args.sim_device = args.device
+        args.rl_device = args.device
+    args.sim_device_type, args.compute_device_id = parse_device_str(args.sim_device)
+    pipeline = args.pipeline.lower()
+
+    assert (pipeline == 'cpu' or pipeline in ('gpu', 'cuda')), f"Invalid pipeline '{args.pipeline}'. Should be either cpu or gpu."
+    args.use_gpu_pipeline = (pipeline in ('gpu', 'cuda'))
+
+    if args.sim_device_type != 'cuda' and args.flex:
+        print("Can't use Flex with CPU. Changing sim device to 'cuda:0'")
+        args.sim_device = 'cuda:0'
+        args.sim_device_type, args.compute_device_id = parse_device_str(args.sim_device)
+
+    if (args.sim_device_type != 'cuda' and pipeline == 'gpu'):
+        print("Can't use GPU pipeline with CPU Physics. Changing pipeline to 'CPU'.")
+        args.pipeline = 'CPU'
+        args.use_gpu_pipeline = False
+
+    # Default to PhysX
+    args.physics_engine = gymapi.SIM_PHYSX
+    args.use_gpu = (args.sim_device_type == 'cuda')
+
+    if args.flex:
+        args.physics_engine = gymapi.SIM_FLEX
+
+    # Using --nographics implies --headless
+    if no_graphics and args.nographics:
+        args.headless = True
+
+    if args.slices is None:
+        args.slices = args.subscenes
+
+    return args

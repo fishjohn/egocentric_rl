@@ -30,3 +30,4 @@
 
 from .actor_critic import ActorCriticRMA
 from .estimator import Estimator
+from .depth_backbone import RecurrentDepthBackbone, DepthOnlyFCBackbone58x87

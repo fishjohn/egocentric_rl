@@ -5,6 +5,33 @@
 <robot
   name="biped">
 
+  <link name="base">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <box size="0.001 0.001 0.001"/>
+      </geometry>
+    </visual>
+  </link>
+  <link name="camera_box">
+    <visual>
+      <origin rpy="0 0 0" xyz="0.07 0 0.00"/>
+      <geometry>
+        <box size="0.025 0.09 0.025"/>
+      </geometry>
+      <material name="red"/>
+    </visual>
+  </link>
+  <joint name="fixed_camera_box" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+    <parent link="base"/>
+    <child link="camera_box"/>
+  </joint>
+  <joint name="floating_base" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+    <parent link="base"/>
+    <child link="base_Link"/>
+  </joint>
   <link
     name="base_Link">
     <inertial>

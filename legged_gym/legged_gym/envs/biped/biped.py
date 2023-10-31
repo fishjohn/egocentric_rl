@@ -6,15 +6,87 @@ from isaacgym.torch_utils import *
 from isaacgym import gymtorch, gymapi, gymutil
 
 from legged_gym import LEGGED_GYM_ROOT_DIR
+from legged_gym.utils.terrain import Terrain
 
-import torch
-from typing import Tuple, Dict
+import cv2
+import torch, torchvision
 from legged_gym.envs import LeggedRobot
+from ..base.legged_robot_config import LeggedRobotCfg
 
 from tqdm import tqdm
 
 
 class Biped(LeggedRobot):
+
+    def __init__(self, cfg: LeggedRobotCfg, sim_params, physics_engine, sim_device, headless):
+        super().__init__(cfg, sim_params, physics_engine, sim_device, headless)
+        self.resize_transform = torchvision.transforms.Resize((self.cfg.depth.resized[1], self.cfg.depth.resized[0]),
+                                                              interpolation=torchvision.transforms.InterpolationMode.BICUBIC)
+        self.global_counter = 0
+        self.total_env_steps_counter = 0
+
+        self.reset_idx(torch.arange(self.num_envs, device=self.device))
+        self.post_physics_step()
+
+    def step(self, actions):
+        """ Apply actions, simulate, call self.post_physics_step()
+
+        Args:
+            actions (torch.Tensor): Tensor of shape (num_envs, num_actions_per_env)
+        """
+        clip_actions = self.cfg.normalization.clip_actions
+        self.actions = torch.clip(actions, -clip_actions, clip_actions).to(self.device)
+        # step physics and render each frame
+        self.render()
+        for _ in range(self.cfg.control.decimation):
+            self.torques = self._compute_torques(self.actions).view(self.torques.shape)
+            self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(self.torques))
+            self.gym.simulate(self.sim)
+            if self.device == 'cpu':
+                self.gym.fetch_results(self.sim, True)
+            self.gym.refresh_dof_state_tensor(self.sim)
+        self.post_physics_step()
+
+        self.global_counter += 1
+        self.total_env_steps_counter += 1
+
+        # return clipped obs, clipped states (None), rewards, dones and infos
+        clip_obs = self.cfg.normalization.clip_observations
+        self.obs_buf = torch.clip(self.obs_buf, -clip_obs, clip_obs)
+        if self.privileged_obs_buf is not None:
+            self.privileged_obs_buf = torch.clip(self.privileged_obs_buf, -clip_obs, clip_obs)
+        if self.cfg.depth.use_camera and self.global_counter % self.cfg.depth.update_interval == 0:
+            self.extras["depth"] = self.depth_buffer[:, -2]  # have already selected last one
+        else:
+            self.extras["depth"] = None
+        return self.obs_buf, self.privileged_obs_buf, self.rew_buf, self.reset_buf, self.extras
+
+    def create_sim(self):
+        """ Creates simulation, terrain and evironments
+        """
+        self.up_axis_idx = 2  # 2 for z, 1 for y -> adapt gravity accordingly
+        if self.cfg.depth.use_camera:
+            self.graphics_device_id = self.sim_device_id  # required in headless mode
+        self.sim = self.gym.create_sim(self.sim_device_id, self.graphics_device_id, self.physics_engine,
+                                       self.sim_params)
+        mesh_type = self.cfg.terrain.mesh_type
+        start = time()
+        print("*" * 80)
+        print("Start creating ground...")
+        if mesh_type in ['heightfield', 'trimesh']:
+            self.terrain = Terrain(self.cfg.terrain, self.num_envs)
+        if mesh_type == 'plane':
+            self._create_ground_plane()
+        elif mesh_type == 'heightfield':
+            self._create_heightfield()
+        elif mesh_type == 'trimesh':
+            self._create_trimesh()
+        elif mesh_type is not None:
+            raise ValueError("Terrain mesh type not recognised. Allowed types are [None, plane, heightfield, trimesh]")
+        print("Finished creating ground. Time taken {:.2f} s".format(time() - start))
+        print("*" * 80)
+        self._create_envs()
+
     def _init_buffers(self):
         super()._init_buffers()
         rigid_body_state_tensor = self.gym.acquire_rigid_body_state_tensor(self.sim)
@@ -29,6 +101,12 @@ class Biped(LeggedRobot):
                                                device=self.device, dtype=torch.float)
         self.contact_buf = torch.zeros(self.num_envs, self.cfg.env.contact_buf_len, 2, device=self.device,
                                        dtype=torch.float)
+
+        if self.cfg.depth.use_camera:
+            self.depth_buffer = torch.zeros(self.num_envs,
+                                            self.cfg.depth.buffer_len,
+                                            self.cfg.depth.resized[1],
+                                            self.cfg.depth.resized[0]).to(self.device)
 
     def _create_envs(self):
         """ Creates environments:
@@ -116,6 +194,8 @@ class Biped(LeggedRobot):
             self.gym.set_actor_rigid_body_properties(env_handle, anymal_handle, body_props, recomputeInertia=True)
             self.envs.append(env_handle)
             self.actor_handles.append(anymal_handle)
+
+            self.attach_camera(i, env_handle, anymal_handle)
 
             self.mass_params_tensor[i, :] = torch.from_numpy(mass_params).to(self.device).to(torch.float)
         if self.cfg.domain_rand.randomize_friction:
@@ -269,6 +349,9 @@ class Biped(LeggedRobot):
         self.compute_reward()
         env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
         self.reset_idx(env_ids)
+
+        self.update_depth_buffer()
+
         self.compute_observations()  # in some cases a simulation step might be required to refresh some obs (for example body positions)
 
         self.last_actions[:] = self.actions[:]
@@ -276,7 +359,12 @@ class Biped(LeggedRobot):
         self.last_root_vel[:] = self.root_states[:, 7:13]
 
         if self.viewer and self.enable_viewer_sync and self.debug_viz:
-            self._draw_debug_vis()
+            self.gym.clear_lines(self.viewer)
+            if self.cfg.depth.use_camera:
+                window_name = "Depth Image"
+                cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+                cv2.imshow("Depth Image", self.depth_buffer[0, -1].cpu().numpy() + 0.5)
+                cv2.waitKey(1)
 
     def _process_rigid_body_props(self, props, env_id):
         # No need to use tensors as only called upon env creation
@@ -294,6 +382,82 @@ class Biped(LeggedRobot):
             rand_com = np.zeros(3)
         mass_params = np.concatenate([rand_mass, rand_com])
         return props, mass_params
+
+    # ------------ depth vision ----------------
+
+    def attach_camera(self, i, env_handle, actor_handle):
+        if self.cfg.depth.use_camera:
+            config = self.cfg.depth
+            camera_props = gymapi.CameraProperties()
+            camera_props.width = self.cfg.depth.original[0]
+            camera_props.height = self.cfg.depth.original[1]
+            camera_props.enable_tensors = True
+            camera_horizontal_fov = self.cfg.depth.horizontal_fov
+            camera_props.horizontal_fov = camera_horizontal_fov
+
+            camera_handle = self.gym.create_camera_sensor(env_handle, camera_props)
+            self.cam_handles.append(camera_handle)
+
+            local_transform = gymapi.Transform()
+
+            camera_position = np.copy(config.position)
+            camera_angle = np.random.uniform(config.angle[0], config.angle[1])
+
+            local_transform.p = gymapi.Vec3(*camera_position)
+            local_transform.r = gymapi.Quat.from_euler_zyx(0, np.radians(camera_angle), 0)
+            root_handle = self.gym.get_actor_root_rigid_body_handle(env_handle, actor_handle)
+
+            self.gym.attach_camera_to_body(camera_handle, env_handle, root_handle, local_transform,
+                                           gymapi.FOLLOW_TRANSFORM)
+
+    def update_depth_buffer(self):
+        if not self.cfg.depth.use_camera:
+            return
+
+        if self.global_counter % self.cfg.depth.update_interval != 0:
+            return
+        self.gym.step_graphics(self.sim)  # required to render in headless mode
+        self.gym.render_all_camera_sensors(self.sim)
+        self.gym.start_access_image_tensors(self.sim)
+
+        for i in range(self.num_envs):
+            depth_image_ = self.gym.get_camera_image_gpu_tensor(self.sim,
+                                                                self.envs[i],
+                                                                self.cam_handles[i],
+                                                                gymapi.IMAGE_DEPTH)
+
+            depth_image = gymtorch.wrap_tensor(depth_image_)
+            depth_image = self.process_depth_image(depth_image, i)
+
+            init_flag = self.episode_length_buf <= 1
+            if init_flag[i]:
+                self.depth_buffer[i] = torch.stack([depth_image] * self.cfg.depth.buffer_len, dim=0)
+            else:
+                self.depth_buffer[i] = torch.cat([self.depth_buffer[i, 1:], depth_image.to(self.device).unsqueeze(0)],
+                                                 dim=0)
+
+        self.gym.end_access_image_tensors(self.sim)
+
+    def normalize_depth_image(self, depth_image):
+        depth_image = depth_image * -1
+        depth_image = (depth_image - self.cfg.depth.near_clip) / (
+                self.cfg.depth.far_clip - self.cfg.depth.near_clip) - 0.5
+        return depth_image
+
+    def process_depth_image(self, depth_image, env_id):
+        # These operations are replicated on the hardware
+        depth_image = self.crop_depth_image(depth_image)
+        depth_image += self.cfg.depth.dis_noise * 2 * (torch.rand(1) - 0.5)[0]
+        depth_image = torch.clip(depth_image, -self.cfg.depth.far_clip, -self.cfg.depth.near_clip)
+        depth_image = self.resize_transform(depth_image[None, :]).squeeze()
+        depth_image = self.normalize_depth_image(depth_image)
+        return depth_image
+
+    def crop_depth_image(self, depth_image):
+        # crop 30 pixels from the left and right and and 20 pixels from bottom and return croped image
+        return depth_image[:-2, 4:-4]
+
+    # ------------ reward functions----------------
 
     def _reward_no_fly(self):
         contacts = self.contact_forces[:, self.feet_indices, 2] > 0.1

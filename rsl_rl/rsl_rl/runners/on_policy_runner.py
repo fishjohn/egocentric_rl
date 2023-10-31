@@ -32,12 +32,13 @@ import time
 import os
 from collections import deque
 import statistics
+import warnings
 
 import torch
 import wandb
 
 from rsl_rl.algorithms import PPO
-from rsl_rl.modules import ActorCriticRMA, Estimator
+from rsl_rl.modules import ActorCriticRMA, Estimator, RecurrentDepthBackbone, DepthOnlyFCBackbone58x87
 from rsl_rl.env import VecEnv
 
 from copy import copy, deepcopy
@@ -55,6 +56,7 @@ class OnPolicyRunner:
         self.alg_cfg = train_cfg["algorithm"]
         self.policy_cfg = train_cfg["policy"]
         self.estimator_cfg = train_cfg["estimator"]
+        self.depth_encoder_cfg = train_cfg["depth_encoder"]
         self.device = device
         self.env = env
 
@@ -70,9 +72,24 @@ class OnPolicyRunner:
         estimator = Estimator(input_dim=env.cfg.env.n_proprio, output_dim=env.cfg.env.n_priv,
                               hidden_dims=self.estimator_cfg["hidden_dims"]).to(self.device)
 
+        # Depth encoder
+        self.if_depth = self.depth_encoder_cfg["if_depth"]
+        if self.if_depth:
+            n_proprio = env.cfg.env.n_proprio
+            vision_laten_dim = self.policy_cfg["scan_encoder_dims"][-1]
+            depth_backbone = DepthOnlyFCBackbone58x87(n_proprio, vision_laten_dim,
+                                                      self.depth_encoder_cfg["hidden_dims"],
+                                                      )
+            depth_encoder = RecurrentDepthBackbone(depth_backbone, n_proprio, vision_laten_dim).to(self.device)
+            depth_actor = deepcopy(actor_critic.actor)
+        else:
+            depth_encoder = None
+            depth_actor = None
+
         alg_class = eval(self.cfg["algorithm_class_name"])  # PPO
         self.alg: PPO = alg_class(actor_critic,
                                   estimator, self.estimator_cfg,
+                                  depth_encoder, self.depth_encoder_cfg, depth_actor,
                                   device=self.device, **self.alg_cfg)
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
         self.save_interval = self.cfg["save_interval"]
@@ -82,6 +99,8 @@ class OnPolicyRunner:
         self.alg.init_storage(self.env.num_envs, self.num_steps_per_env, [self.env.num_obs],
                               [self.env.num_privileged_obs], [self.env.num_actions])
 
+        self.learn = self.learn_RL if not self.if_depth else self.learn_vision
+
         # Log
         self.log_dir = log_dir
         self.tot_timesteps = 0
@@ -90,7 +109,7 @@ class OnPolicyRunner:
 
         _, _ = self.env.reset()
 
-    def learn(self, num_learning_iterations, init_at_random_ep_len=False):
+    def learn_RL(self, num_learning_iterations, init_at_random_ep_len=False):
         mean_value_loss = 0.
         mean_surrogate_loss = 0.
         mean_estimator_loss = 0.
@@ -170,6 +189,160 @@ class OnPolicyRunner:
 
         self.current_learning_iteration += num_learning_iterations
         self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(self.current_learning_iteration)))
+
+    def learn_vision(self, num_learning_iterations, init_at_random_ep_len=False):
+        tot_iter = self.current_learning_iteration + num_learning_iterations
+        self.start_learning_iteration = copy(self.current_learning_iteration)
+
+        ep_infos = []
+        rewbuffer = deque(maxlen=100)
+        lenbuffer = deque(maxlen=100)
+        cur_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+        cur_episode_length = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+
+        obs = self.env.get_observations()
+        infos = {"depth": self.env.depth_buffer.clone().to(self.device)[:, -1] if self.if_depth else None}
+        self.alg.depth_encoder.train()
+        self.alg.depth_actor.train()
+
+        num_pretrain_iter = 0
+        for it in range(self.current_learning_iteration, tot_iter):
+            start = time.time()
+            depth_latent_buffer = []
+            scandots_latent_buffer = []
+            actions_teacher_buffer = []
+            actions_student_buffer = []
+            for i in range(self.depth_encoder_cfg["num_steps_per_env"]):
+                if infos["depth"] != None:
+                    with torch.no_grad():
+                        scandots_latent = self.alg.actor_critic.actor.infer_scandots_latent(obs)
+                    scandots_latent_buffer.append(scandots_latent)
+
+                    depth_image = infos["depth"].clone()
+                    obs_proprio = obs[:, :self.env.cfg.env.n_proprio].clone()
+                    depth_latent = self.alg.depth_encoder(depth_image, obs_proprio)
+                    depth_latent_buffer.append(depth_latent)
+
+                with torch.no_grad():
+                    actions_teacher = self.alg.actor_critic.act_inference(obs, hist_encoding=True, scandots_latent=None)
+                    actions_teacher_buffer.append(actions_teacher)
+
+                obs_student = obs.clone()
+                actions_student = self.alg.depth_actor(obs_student, hist_encoding=True, scandots_latent=depth_latent)
+                actions_student_buffer.append(actions_student)
+
+                # detach actions before feeding the env
+                if it < num_pretrain_iter:
+                    obs, privileged_obs, rewards, dones, infos = self.env.step(
+                        actions_teacher.detach())  # obs has changed to next_obs !! if done obs has been reset
+                else:
+                    obs, privileged_obs, rewards, dones, infos = self.env.step(
+                        actions_student.detach())  # obs has changed to next_obs !! if done obs has been reset
+                critic_obs = privileged_obs if privileged_obs is not None else obs
+                obs, critic_obs, rewards, dones = obs.to(self.device), critic_obs.to(self.device), rewards.to(
+                    self.device), dones.to(self.device)
+
+                if self.log_dir is not None:
+                    # Book keeping
+                    if 'episode' in infos:
+                        ep_infos.append(infos['episode'])
+                    cur_reward_sum += rewards
+                    cur_episode_length += 1
+                    new_ids = (dones > 0).nonzero(as_tuple=False)
+                    rewbuffer.extend(cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
+                    lenbuffer.extend(cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
+                    cur_reward_sum[new_ids] = 0
+                    cur_episode_length[new_ids] = 0
+
+            stop = time.time()
+            collection_time = stop - start
+            start = stop
+
+            scandots_latent_buffer = torch.cat(scandots_latent_buffer, dim=0)
+            depth_latent_buffer = torch.cat(depth_latent_buffer, dim=0)
+            depth_encoder_loss = 0
+            # depth_encoder_loss = self.alg.update_depth_encoder(depth_latent_buffer, scandots_latent_buffer)
+
+
+            actions_teacher_buffer = torch.cat(actions_teacher_buffer, dim=0)
+            actions_student_buffer = torch.cat(actions_student_buffer, dim=0)
+            depth_actor_loss = self.alg.update_depth_actor(actions_student_buffer, actions_teacher_buffer)
+
+            stop = time.time()
+            learn_time = stop - start
+
+            self.alg.depth_encoder.detach_hidden_states()
+
+            if self.log_dir is not None:
+                self.log_vision(locals())
+            if (it - self.start_learning_iteration < 2500 and it % self.save_interval == 0) or \
+                    (it - self.start_learning_iteration < 5000 and it % (2 * self.save_interval) == 0) or \
+                    (it - self.start_learning_iteration >= 5000 and it % (5 * self.save_interval) == 0):
+                self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)))
+            ep_infos.clear()
+
+    def log_vision(self, locs, width=80, pad=35):
+        self.tot_timesteps += self.num_steps_per_env * self.env.num_envs
+        self.tot_time += locs['collection_time'] + locs['learn_time']
+        iteration_time = locs['collection_time'] + locs['learn_time']
+
+        ep_string = f''
+        wandb_dict = {}
+        if locs['ep_infos']:
+            for key in locs['ep_infos'][0]:
+                infotensor = torch.tensor([], device=self.device)
+                for ep_info in locs['ep_infos']:
+                    # handle scalar and zero dimensional tensor infos
+                    if not isinstance(ep_info[key], torch.Tensor):
+                        ep_info[key] = torch.Tensor([ep_info[key]])
+                    if len(ep_info[key].shape) == 0:
+                        ep_info[key] = ep_info[key].unsqueeze(0)
+                    infotensor = torch.cat((infotensor, ep_info[key].to(self.device)))
+                value = torch.mean(infotensor)
+                wandb_dict['Episode_rew/' + key] = value
+                ep_string += f"""{f'Mean episode {key}:':>{pad}} {value:.4f}\n"""
+        mean_std = self.alg.actor_critic.std.mean()
+        fps = int(self.num_steps_per_env * self.env.num_envs / (locs['collection_time'] + locs['learn_time']))
+
+        wandb_dict['Loss_depth/depth_encoder'] = locs['depth_encoder_loss']
+        wandb_dict['Loss_depth/depth_actor'] = locs['depth_actor_loss']
+        wandb_dict['Policy/mean_noise_std'] = mean_std.item()
+        wandb_dict['Perf/total_fps'] = fps
+        wandb_dict['Perf/collection time'] = locs['collection_time']
+        wandb_dict['Perf/learning_time'] = locs['learn_time']
+        if len(locs['rewbuffer']) > 0:
+            wandb_dict['Train/mean_reward'] = statistics.mean(locs['rewbuffer'])
+            wandb_dict['Train/mean_episode_length'] = statistics.mean(locs['lenbuffer'])
+
+        wandb.log(wandb_dict, step=locs['it'])
+
+        str = f" \033[1m Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m "
+
+        if len(locs['rewbuffer']) > 0:
+            log_string = (f"""{'#' * width}\n"""
+                          f"""{str.center(width, ' ')}\n\n"""
+                          f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
+                              'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
+                          f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"""
+                          f"""{'Mean reward (total):':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
+                          f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n"""
+                          f"""{'Depth encoder loss:':>{pad}} {locs['depth_encoder_loss']:.4f}\n"""
+                          f"""{'Depth actor loss:':>{pad}} {locs['depth_actor_loss']:.4f}\n""")
+        else:
+            log_string = (f"""{'#' * width}\n""")
+
+        log_string += f"""{'-' * width}\n"""
+        log_string += ep_string
+        curr_it = locs['it'] - self.start_learning_iteration
+        eta = self.tot_time / (curr_it + 1) * (locs['num_learning_iterations'] - curr_it)
+        mins = eta // 60
+        secs = eta % 60
+        log_string += (f"""{'-' * width}\n"""
+                       f"""{'Total timesteps:':>{pad}} {self.tot_timesteps}\n"""
+                       f"""{'Iteration time:':>{pad}} {iteration_time:.2f}s\n"""
+                       f"""{'Total time:':>{pad}} {self.tot_time:.2f}s\n"""
+                       f"""{'ETA:':>{pad}} {mins:.0f} mins {secs:.1f} s\n""")
+        print(log_string)
 
     def log(self, locs, width=80, pad=35):
         self.tot_timesteps += self.num_steps_per_env * self.env.num_envs
@@ -257,6 +430,9 @@ class OnPolicyRunner:
             'iter': self.current_learning_iteration,
             'infos': infos,
         }
+        if self.if_depth:
+            state_dict['depth_encoder_state_dict'] = self.alg.depth_encoder.state_dict()
+            state_dict['depth_actor_state_dict'] = self.alg.depth_actor.state_dict()
         torch.save(state_dict, path)
 
     def load(self, path, load_optimizer=True):
@@ -265,9 +441,21 @@ class OnPolicyRunner:
         loaded_dict = torch.load(path, map_location=self.device)
         self.alg.actor_critic.load_state_dict(loaded_dict['model_state_dict'])
         self.alg.estimator.load_state_dict(loaded_dict['estimator_state_dict'])
+        if self.if_depth:
+            if 'depth_encoder_state_dict' not in loaded_dict:
+                warnings.warn("'depth_encoder_state_dict' key does not exist, not loading depth encoder...")
+            else:
+                print("Saved depth encoder detected, loading...")
+                self.alg.depth_encoder.load_state_dict(loaded_dict['depth_encoder_state_dict'])
+            if 'depth_actor_state_dict' in loaded_dict:
+                print("Saved depth actor detected, loading...")
+                self.alg.depth_actor.load_state_dict(loaded_dict['depth_actor_state_dict'])
+            else:
+                print("No saved depth actor, Copying actor critic actor to depth actor...")
+                self.alg.depth_actor.load_state_dict(self.alg.actor_critic.actor.state_dict())
         if load_optimizer:
             self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
-        self.current_learning_iteration = loaded_dict['iter']
+        # self.current_learning_iteration = loaded_dict['iter']
         print("*" * 80)
         return loaded_dict['infos']
 

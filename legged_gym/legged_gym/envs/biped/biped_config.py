@@ -14,6 +14,26 @@ class BipedCfg(LeggedRobotCfg):
         num_privileged_obs = None  # if not None a priviledge_obs_buf will be returned by step() (critic obs for assymetric training). None is returned otherwise
         num_actions = 6
 
+    class depth:
+        use_camera = False
+        camera_num_envs = 92
+        camera_terrain_num_rows = 10
+        camera_terrain_num_cols = 20
+
+        position = [0.07, 0, 0.00]  # front camera
+        angle = [-5, 5]  # positive pitch down
+
+        update_interval = 5  # 5 works without retraining, 8 worse
+
+        original = (106, 60)
+        resized = (87, 58)
+        horizontal_fov = 87
+        buffer_len = 2
+
+        near_clip = 0
+        far_clip = 2
+        dis_noise = 0.0
+
     # class terrain(LeggedRobotCfg.terrain):
     #     measure_heights = True
     #     measured_points_x = [-0.45, -0.3, -0.15, 0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1.05,
@@ -84,3 +104,11 @@ class BipedCfgPPO(LeggedRobotCfgPPO):
 
     class algorithm(LeggedRobotCfgPPO.algorithm):
         entropy_coef = 0.01
+
+    class depth_encoder:
+        if_depth = BipedCfg.depth.use_camera
+        depth_shape = BipedCfg.depth.resized
+        buffer_len = BipedCfg.depth.buffer_len
+        hidden_dims = 512
+        learning_rate = 1.e-3
+        num_steps_per_env = BipedCfg.depth.update_interval * 24

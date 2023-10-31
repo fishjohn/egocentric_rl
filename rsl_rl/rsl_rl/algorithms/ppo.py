@@ -43,6 +43,9 @@ class PPO:
                  actor_critic,
                  estimator,
                  estimator_paras,
+                 depth_encoder,
+                 depth_encoder_paras,
+                 depth_actor,
                  num_learning_epochs=1,
                  num_mini_batches=1,
                  clip_param=0.2,
@@ -98,6 +101,17 @@ class PPO:
         self.num_scan = estimator_paras["num_scan"]
         self.estimator_optimizer = optim.Adam(self.estimator.parameters(), lr=estimator_paras["learning_rate"])
         self.train_with_estimated_states = estimator_paras["train_with_estimated_states"]
+
+        # Depth encoder
+        self.if_depth = depth_encoder != None
+        if self.if_depth:
+            self.depth_encoder = depth_encoder
+            self.depth_encoder_optimizer = optim.Adam(self.depth_encoder.parameters(),
+                                                      lr=depth_encoder_paras["learning_rate"])
+            self.depth_encoder_paras = depth_encoder_paras
+            self.depth_actor = depth_actor
+            self.depth_actor_optimizer = optim.Adam([*self.depth_actor.parameters(), *self.depth_encoder.parameters()],
+                                                    lr=depth_encoder_paras["learning_rate"])
 
     def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape):
         self.storage = RolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape,
@@ -290,6 +304,16 @@ class PPO:
         self.storage.clear()
         self.update_counter()
         return mean_hist_latent_loss
+
+    def update_depth_actor(self, actions_student_batch, actions_teacher_batch):
+        if self.if_depth:
+            loss = (actions_teacher_batch.detach() - actions_student_batch).norm(p=2, dim=1).mean()
+
+            self.depth_actor_optimizer.zero_grad()
+            loss.backward()
+            nn.utils.clip_grad_norm_(self.depth_actor.parameters(), self.max_grad_norm)
+            self.depth_actor_optimizer.step()
+            return loss.item()
 
     def update_counter(self):
         self.counter += 1
