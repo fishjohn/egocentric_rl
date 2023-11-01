@@ -261,12 +261,11 @@ class OnPolicyRunner:
             scandots_latent_buffer = torch.cat(scandots_latent_buffer, dim=0)
             depth_latent_buffer = torch.cat(depth_latent_buffer, dim=0)
             depth_encoder_loss = 0
-            # depth_encoder_loss = self.alg.update_depth_encoder(depth_latent_buffer, scandots_latent_buffer)
-
+            depth_encoder_loss = self.alg.update_depth_encoder(depth_latent_buffer, scandots_latent_buffer)
 
             actions_teacher_buffer = torch.cat(actions_teacher_buffer, dim=0)
             actions_student_buffer = torch.cat(actions_student_buffer, dim=0)
-            depth_actor_loss = self.alg.update_depth_actor(actions_student_buffer, actions_teacher_buffer)
+            # depth_actor_loss = self.alg.update_depth_actor(actions_student_buffer, actions_teacher_buffer)
 
             stop = time.time()
             learn_time = stop - start
@@ -305,7 +304,7 @@ class OnPolicyRunner:
         fps = int(self.num_steps_per_env * self.env.num_envs / (locs['collection_time'] + locs['learn_time']))
 
         wandb_dict['Loss_depth/depth_encoder'] = locs['depth_encoder_loss']
-        wandb_dict['Loss_depth/depth_actor'] = locs['depth_actor_loss']
+        # wandb_dict['Loss_depth/depth_actor'] = locs['depth_actor_loss']
         wandb_dict['Policy/mean_noise_std'] = mean_std.item()
         wandb_dict['Perf/total_fps'] = fps
         wandb_dict['Perf/collection time'] = locs['collection_time']
@@ -326,10 +325,13 @@ class OnPolicyRunner:
                           f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"""
                           f"""{'Mean reward (total):':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
                           f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n"""
-                          f"""{'Depth encoder loss:':>{pad}} {locs['depth_encoder_loss']:.4f}\n"""
-                          f"""{'Depth actor loss:':>{pad}} {locs['depth_actor_loss']:.4f}\n""")
+                          f"""{'Depth encoder loss:':>{pad}} {locs['depth_encoder_loss']:.4f}\n""")
         else:
-            log_string = (f"""{'#' * width}\n""")
+            log_string = (f"""{'#' * width}\n"""
+                          f"""{str.center(width, ' ')}\n\n"""
+                          f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
+                            'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
+                          f"""{'Depth encoder loss:':>{pad}} {locs['depth_encoder_loss']:.4f}\n""")
 
         log_string += f"""{'-' * width}\n"""
         log_string += ep_string

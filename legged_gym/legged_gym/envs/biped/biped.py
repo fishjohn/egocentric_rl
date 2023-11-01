@@ -240,6 +240,12 @@ class Biped(LeggedRobot):
         self.y_edge_mask = torch.tensor(self.terrain.y_edge_mask).view(self.terrain.tot_rows, self.terrain.tot_cols).to(
             self.device)
 
+    def _parse_cfg(self, cfg):
+        super()._parse_cfg(cfg)
+        # When using depth imaging, eliminate the backward motion command.
+        if self.cfg.depth.use_camera:
+            self.command_ranges["lin_vel_x"][0] = 0.0
+
     def compute_observations(self):
         """
         Computes observations
