@@ -132,6 +132,7 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
     if env_cfg is not None:
         if args.use_camera:
             env_cfg.depth.use_camera = args.use_camera
+        if env_cfg.depth.use_camera and args.headless:
             env_cfg.env.num_envs = env_cfg.depth.camera_num_envs
 
         # num envs

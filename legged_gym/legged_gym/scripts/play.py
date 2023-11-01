@@ -44,8 +44,10 @@ def play(args):
 
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
     # override some parameters for testing
-    env_cfg.env.num_envs = min(env_cfg.env.num_envs, 50)
-    env_cfg.terrain.num_rows = 5
+    # env_cfg.env.num_envs = min(env_cfg.env.num_envs, 50)
+    env_cfg.env.num_envs = 10
+    env_cfg.depth.angle = [40, 40]
+    env_cfg.terrain.num_rows = 4
     env_cfg.terrain.num_cols = 5
     env_cfg.terrain.curriculum = False
     env_cfg.noise.add_noise = False
@@ -60,6 +62,9 @@ def play(args):
     ppo_runner, train_cfg = task_registry.make_alg_runner(log_root=log_pth, env=env, name=args.task, args=args,
                                                           train_cfg=train_cfg)
     policy = ppo_runner.get_inference_policy(device=env.device)
+
+    if env.cfg.depth.use_camera:
+        depth_encoder = ppo_runner.get_depth_encoder_inference_policy(device=env.device)
 
     # export policy as a jit module (used to run it from C++)
     if EXPORT_POLICY:
@@ -77,8 +82,22 @@ def play(args):
     camera_direction = np.array(env_cfg.viewer.lookat) - np.array(env_cfg.viewer.pos)
     img_idx = 0
 
+    infos = {"depth": env.depth_buffer.clone().to(ppo_runner.device)[:, -1] if ppo_runner.if_depth else None}
     for i in range(10 * int(env.max_episode_length)):
-        actions = policy(obs.detach())
+        depth_latent = None
+        actions = torch.zeros(env.num_envs, env.num_actions, device=env.device, requires_grad=False)
+
+        if env.cfg.depth.use_camera:
+            if infos["depth"] is not None:
+                depth_image = infos["depth"].clone()
+                obs_proprio = obs[:, :env.cfg.env.n_proprio].clone()
+                depth_latent = depth_encoder(depth_image, obs_proprio)
+
+        if hasattr(ppo_runner.alg, "depth_actor"):
+            actions = ppo_runner.alg.depth_actor(obs.detach(), hist_encoding=True, scandots_latent=depth_latent)
+        else:
+            actions = policy(obs.detach(), hist_encoding=True, scandots_latent=depth_latent)
+
         obs, _, rews, dones, infos = env.step(actions.detach())
         if RECORD_FRAMES:
             if i % 2:

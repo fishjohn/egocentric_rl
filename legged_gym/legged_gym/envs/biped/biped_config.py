@@ -20,8 +20,8 @@ class BipedCfg(LeggedRobotCfg):
         camera_terrain_num_rows = 10
         camera_terrain_num_cols = 20
 
-        position = [0.07, 0, 0.00]  # front camera
-        angle = [-5, 5]  # positive pitch down
+        position = [0.10, 0, -0.10]  # front camera
+        angle = [40, 40]  # positive pitch down
 
         update_interval = 5  # 5 works without retraining, 8 worse
 
@@ -34,7 +34,9 @@ class BipedCfg(LeggedRobotCfg):
         far_clip = 2
         dis_noise = 0.0
 
-    # class terrain(LeggedRobotCfg.terrain):
+    class terrain(LeggedRobotCfg.terrain):
+        horizontal_scale_camera = 0.1
+
     #     measure_heights = True
     #     measured_points_x = [-0.45, -0.3, -0.15, 0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1.05,
     #                          1.2]  # 1mx1.6m rectangle (without center line)

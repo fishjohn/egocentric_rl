@@ -20,6 +20,8 @@ class Biped(LeggedRobot):
 
     def __init__(self, cfg: LeggedRobotCfg, sim_params, physics_engine, sim_device, headless):
         super().__init__(cfg, sim_params, physics_engine, sim_device, headless)
+        self.debug_viz = True
+
         self.resize_transform = torchvision.transforms.Resize((self.cfg.depth.resized[1], self.cfg.depth.resized[0]),
                                                               interpolation=torchvision.transforms.InterpolationMode.BICUBIC)
         self.global_counter = 0
@@ -369,7 +371,7 @@ class Biped(LeggedRobot):
             if self.cfg.depth.use_camera:
                 window_name = "Depth Image"
                 cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-                cv2.imshow("Depth Image", self.depth_buffer[0, -1].cpu().numpy() + 0.5)
+                cv2.imshow("Depth Image", self.depth_buffer[4, -1].cpu().numpy() + 0.5)
                 cv2.waitKey(1)
 
     def _process_rigid_body_props(self, props, env_id):

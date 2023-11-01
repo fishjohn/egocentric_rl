@@ -330,7 +330,7 @@ class OnPolicyRunner:
             log_string = (f"""{'#' * width}\n"""
                           f"""{str.center(width, ' ')}\n\n"""
                           f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
-                            'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
+                              'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
                           f"""{'Depth encoder loss:':>{pad}} {locs['depth_encoder_loss']:.4f}\n""")
 
         log_string += f"""{'-' * width}\n"""
@@ -478,3 +478,9 @@ class OnPolicyRunner:
         if device is not None:
             self.alg.estimator.to(device)
         return self.alg.estimator.inference
+
+    def get_depth_encoder_inference_policy(self, device=None):
+        self.alg.depth_encoder.eval()
+        if device is not None:
+            self.alg.depth_encoder.to(device)
+        return self.alg.depth_encoder
