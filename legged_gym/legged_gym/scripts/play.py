@@ -84,7 +84,6 @@ def play(args):
 
     infos = {"depth": env.depth_buffer.clone().to(ppo_runner.device)[:, -1] if ppo_runner.if_depth else None}
     for i in range(10 * int(env.max_episode_length)):
-        depth_latent = None
         actions = torch.zeros(env.num_envs, env.num_actions, device=env.device, requires_grad=False)
 
         if env.cfg.depth.use_camera:
@@ -92,6 +91,8 @@ def play(args):
                 depth_image = infos["depth"].clone()
                 obs_proprio = obs[:, :env.cfg.env.n_proprio].clone()
                 depth_latent = depth_encoder(depth_image, obs_proprio)
+        else:
+            depth_latent = None
 
         if hasattr(ppo_runner.alg, "depth_actor"):
             actions = ppo_runner.alg.depth_actor(obs.detach(), hist_encoding=True, scandots_latent=depth_latent)
