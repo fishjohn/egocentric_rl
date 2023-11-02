@@ -4,7 +4,7 @@ from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobot
 class BipedCfg(LeggedRobotCfg):
     class env(LeggedRobotCfg.env):
         num_envs = 8192
-        n_scan = 187
+        n_scan = 121
         n_priv = 3 + 3 + 3
         n_priv_latent = 1 + 3 + 1 + 6 + 6  # [rand_mass, rand_com, friction_coeffs, motor_strength_kps, motor_strength_kds]
         n_proprio = 3 + 3 + 3 + 6 + 6 + 6 + 2
@@ -37,6 +37,11 @@ class BipedCfg(LeggedRobotCfg):
     class terrain(LeggedRobotCfg.terrain):
         simplify_grid = False
         horizontal_scale_if_use_camera = 0.1
+        terrain_proportions = [0.1, 0.1, 0.25, 0.25, 0.1, 0.2]
+
+        measured_points_x = [-0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4,
+                             0.5]  # 1mx1m rectangle (without center line)
+        measured_points_y = [-0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4, 0.5]
 
     #     measure_heights = True
     #     measured_points_x = [-0.45, -0.3, -0.15, 0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1.05,
@@ -103,7 +108,7 @@ class BipedCfgPPO(LeggedRobotCfgPPO):
     class runner(LeggedRobotCfgPPO.runner):
         run_name = ''
         experiment_name = 'biped'
-        max_iterations = 3000  # number of policy updates
+        max_iterations = 10000  # number of policy updates
 
     class algorithm(LeggedRobotCfgPPO.algorithm):
         entropy_coef = 0.01

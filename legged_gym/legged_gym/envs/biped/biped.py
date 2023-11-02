@@ -11,6 +11,7 @@ from legged_gym.utils.terrain import Terrain
 import cv2
 import torch, torchvision
 from legged_gym.envs import LeggedRobot
+from legged_gym.utils.math import quat_apply_yaw, wrap_to_pi, torch_rand_sqrt_float
 from ..base.legged_robot_config import LeggedRobotCfg
 
 from tqdm import tqdm
@@ -27,6 +28,7 @@ class Biped(LeggedRobot):
         self.global_counter = 0
         self.total_env_steps_counter = 0
 
+        self.lookat_id = 0
         self.reset_idx(torch.arange(self.num_envs, device=self.device))
         self.post_physics_step()
 
@@ -374,10 +376,11 @@ class Biped(LeggedRobot):
 
         if self.viewer and self.enable_viewer_sync and self.debug_viz:
             self.gym.clear_lines(self.viewer)
+            self._draw_height_samples()
             if self.cfg.depth.use_camera:
                 window_name = "Depth Image"
                 cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-                cv2.imshow("Depth Image", self.depth_buffer[4, -1].cpu().numpy() + 0.5)
+                cv2.imshow("Depth Image", self.depth_buffer[self.lookat_id, -1].cpu().numpy() + 0.5)
                 cv2.waitKey(1)
 
     def _process_rigid_body_props(self, props, env_id):
@@ -396,6 +399,26 @@ class Biped(LeggedRobot):
             rand_com = np.zeros(3)
         mass_params = np.concatenate([rand_mass, rand_com])
         return props, mass_params
+
+    def _draw_height_samples(self):
+        """ Draws visualizations for dubugging (slows down simulation a lot).
+            Default behaviour: draws height measurement points
+        """
+        # draw height lines
+        if not self.terrain.cfg.measure_heights:
+            return
+        self.gym.refresh_rigid_body_state_tensor(self.sim)
+        sphere_geom = gymutil.WireframeSphereGeometry(0.02, 4, 4, None, color=(1, 1, 0))
+        i = self.lookat_id
+        base_pos = (self.root_states[i, :3]).cpu().numpy()
+        heights = self.measured_heights[i].cpu().numpy()
+        height_points = quat_apply_yaw(self.base_quat[i].repeat(heights.shape[0]), self.height_points[i]).cpu().numpy()
+        for j in range(heights.shape[0]):
+            x = height_points[j, 0] + base_pos[0]
+            y = height_points[j, 1] + base_pos[1]
+            z = heights[j]
+            sphere_pose = gymapi.Transform(gymapi.Vec3(x, y, z), r=None)
+            gymutil.draw_lines(sphere_geom, self.gym, self.viewer, self.envs[i], sphere_pose)
 
     # ------------ depth vision ----------------
 
