@@ -134,6 +134,8 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
             env_cfg.depth.use_camera = args.use_camera
         if env_cfg.depth.use_camera and args.headless:
             env_cfg.env.num_envs = env_cfg.depth.camera_num_envs
+            env_cfg.terrain.simplify_grid = True
+            env_cfg.terrain.horizontal_scale = env_cfg.terrain.horizontal_scale_if_use_camera
 
         # num envs
         if args.num_envs is not None:
@@ -244,6 +246,7 @@ class PolicyExporterLSTM(torch.nn.Module):
         traced_script_module = torch.jit.script(self)
         traced_script_module.save(path)
 
+
 def parse_device_str(device_str):
     # defaults
     device = 'cpu'
@@ -261,6 +264,7 @@ def parse_device_str(device_str):
         except ValueError:
             raise ValueError(f'Invalid device string "{device_str}". Cannot parse "{device_id}"" as a valid device id')
     return device, device_id
+
 
 def parse_arguments(description="Isaac Gym Example", headless=False, no_graphics=False, custom_parameters=[]):
     parser = argparse.ArgumentParser(description=description)
@@ -289,7 +293,8 @@ def parse_arguments(description="Isaac Gym Example", headless=False, no_graphics
 
             if "type" in argument:
                 if "default" in argument:
-                    parser.add_argument(argument["name"], type=argument["type"], default=argument["default"], help=help_str)
+                    parser.add_argument(argument["name"], type=argument["type"], default=argument["default"],
+                                        help=help_str)
                 else:
                     parser.add_argument(argument["name"], type=argument["type"], help=help_str)
             elif "action" in argument:
@@ -309,7 +314,8 @@ def parse_arguments(description="Isaac Gym Example", headless=False, no_graphics
     args.sim_device_type, args.compute_device_id = parse_device_str(args.sim_device)
     pipeline = args.pipeline.lower()
 
-    assert (pipeline == 'cpu' or pipeline in ('gpu', 'cuda')), f"Invalid pipeline '{args.pipeline}'. Should be either cpu or gpu."
+    assert (pipeline == 'cpu' or pipeline in (
+        'gpu', 'cuda')), f"Invalid pipeline '{args.pipeline}'. Should be either cpu or gpu."
     args.use_gpu_pipeline = (pipeline in ('gpu', 'cuda'))
 
     if args.sim_device_type != 'cuda' and args.flex:

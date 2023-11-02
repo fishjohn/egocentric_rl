@@ -28,6 +28,7 @@
 #
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
+import pyfqmr
 import numpy as np
 from numpy.random import choice
 from scipy import interpolate
@@ -78,6 +79,15 @@ class Terrain:
         structure = np.ones((half_edge_width * 2 + 1, 1))
         self.x_edge_mask = binary_dilation(self.x_edge_mask, structure=structure)
         self.y_edge_mask = binary_dilation(self.y_edge_mask, structure=structure)
+        if self.cfg.simplify_grid:
+            mesh_simplifier = pyfqmr.Simplify()
+            mesh_simplifier.setMesh(self.vertices, self.triangles)
+            mesh_simplifier.simplify_mesh(target_count=int(0.05 * self.triangles.shape[0]), aggressiveness=7,
+                                          preserve_border=True, verbose=10)
+
+            self.vertices, self.triangles, normals = mesh_simplifier.getMesh()
+            self.vertices = self.vertices.astype(np.float32)
+            self.triangles = self.triangles.astype(np.uint32)
 
     def randomized_terrain(self):
         for k in range(self.cfg.num_sub_terrains):

@@ -248,6 +248,12 @@ class Biped(LeggedRobot):
         if self.cfg.depth.use_camera:
             self.command_ranges["lin_vel_x"][0] = 0.0
 
+            # self.command_ranges["lin_vel_y"][0] = 0.0
+            # self.command_ranges["lin_vel_y"][1] = 0.0
+            # self.command_ranges["lin_vel_x"][0] = 0.5
+            # self.command_ranges["ang_vel_yaw"][0] = 0.0
+            # self.command_ranges["ang_vel_yaw"][1] = 0.0
+
     def compute_observations(self):
         """
         Computes observations

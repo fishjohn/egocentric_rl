@@ -16,7 +16,7 @@ class BipedCfg(LeggedRobotCfg):
 
     class depth:
         use_camera = False
-        camera_num_envs = 92
+        camera_num_envs = 192
         camera_terrain_num_rows = 10
         camera_terrain_num_cols = 20
 
@@ -35,7 +35,8 @@ class BipedCfg(LeggedRobotCfg):
         dis_noise = 0.0
 
     class terrain(LeggedRobotCfg.terrain):
-        horizontal_scale_camera = 0.1
+        simplify_grid = False
+        horizontal_scale_if_use_camera = 0.1
 
     #     measure_heights = True
     #     measured_points_x = [-0.45, -0.3, -0.15, 0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1.05,
