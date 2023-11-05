@@ -82,7 +82,7 @@ class Terrain:
         if self.cfg.simplify_grid:
             mesh_simplifier = pyfqmr.Simplify()
             mesh_simplifier.setMesh(self.vertices, self.triangles)
-            mesh_simplifier.simplify_mesh(target_count=int(0.05 * self.triangles.shape[0]), aggressiveness=7,
+            mesh_simplifier.simplify_mesh(target_count=int(0.05 * self.triangles.shape[0]), aggressiveness=1,
                                           preserve_border=True, verbose=10)
 
             self.vertices, self.triangles, normals = mesh_simplifier.getMesh()

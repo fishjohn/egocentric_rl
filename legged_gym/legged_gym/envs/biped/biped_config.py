@@ -16,7 +16,7 @@ class BipedCfg(LeggedRobotCfg):
 
     class depth:
         use_camera = False
-        camera_num_envs = 192
+        camera_num_envs = 128
         camera_terrain_num_rows = 10
         camera_terrain_num_cols = 20
 

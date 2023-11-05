@@ -107,8 +107,6 @@ class OnPolicyRunner:
         self.tot_time = 0
         self.current_learning_iteration = 0
 
-        _, _ = self.env.reset()
-
     def learn_RL(self, num_learning_iterations, init_at_random_ep_len=False):
         mean_value_loss = 0.
         mean_surrogate_loss = 0.
@@ -261,11 +259,11 @@ class OnPolicyRunner:
             scandots_latent_buffer = torch.cat(scandots_latent_buffer, dim=0)
             depth_latent_buffer = torch.cat(depth_latent_buffer, dim=0)
             depth_encoder_loss = 0
-            depth_encoder_loss = self.alg.update_depth_encoder(depth_latent_buffer, scandots_latent_buffer)
+            # depth_encoder_loss = self.alg.update_depth_encoder(depth_latent_buffer, scandots_latent_buffer)
 
             actions_teacher_buffer = torch.cat(actions_teacher_buffer, dim=0)
             actions_student_buffer = torch.cat(actions_student_buffer, dim=0)
-            # depth_actor_loss = self.alg.update_depth_actor(actions_student_buffer, actions_teacher_buffer)
+            depth_actor_loss = self.alg.update_depth_actor(actions_student_buffer, actions_teacher_buffer)
 
             stop = time.time()
             learn_time = stop - start
@@ -303,8 +301,8 @@ class OnPolicyRunner:
         mean_std = self.alg.actor_critic.std.mean()
         fps = int(self.num_steps_per_env * self.env.num_envs / (locs['collection_time'] + locs['learn_time']))
 
-        wandb_dict['Loss_depth/depth_encoder'] = locs['depth_encoder_loss']
-        # wandb_dict['Loss_depth/depth_actor'] = locs['depth_actor_loss']
+        # wandb_dict['Loss_depth/depth_encoder'] = locs['depth_encoder_loss']
+        wandb_dict['Loss_depth/depth_actor'] = locs['depth_actor_loss']
         wandb_dict['Policy/mean_noise_std'] = mean_std.item()
         wandb_dict['Perf/total_fps'] = fps
         wandb_dict['Perf/collection time'] = locs['collection_time']

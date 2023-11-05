@@ -306,33 +306,16 @@ class PPO:
         return mean_hist_latent_loss
 
     def update_depth_encoder(self, depth_latent_batch, scandots_latent_batch):
-        num_epochs = 8
-        num_mini_batches = 10
-
-        batch_size, num_features = depth_latent_batch.shape
-        mini_batch_size = batch_size // num_mini_batches
-        indices = torch.randperm(batch_size, requires_grad=False, device=self.device)
-
-        mean_depth_encoder_loss = 0
+        # Depth encoder ditillation
         if self.if_depth:
-            for epoch in range(num_epochs):
-                for i in range(num_mini_batches):
-                    start = i * mini_batch_size
-                    end = (i + 1) * mini_batch_size
-                    batch_idx = indices[start:end]
+            # TODO: needs to save hidden states
+            depth_encoder_loss = (scandots_latent_batch.detach() - depth_latent_batch).norm(p=2, dim=1).mean()
 
-                    depth_latent_mini_batch = depth_latent_batch[batch_idx]
-                    scandots_latent_mini_batch = scandots_latent_batch[batch_idx]
-                    depth_encoder_loss = (scandots_latent_mini_batch.detach() - depth_latent_mini_batch).norm(p=2,
-                                                                                                              dim=1).mean()
-                    self.depth_encoder_optimizer.zero_grad()
-                    depth_encoder_loss.backward()
-                    nn.utils.clip_grad_norm_(self.depth_encoder.parameters(), self.max_grad_norm)
-                    self.depth_encoder_optimizer.step()
-                    mean_depth_encoder_loss += depth_encoder_loss.item()
-            num_update = num_epochs * num_mini_batches
-            mean_depth_encoder_loss /= num_update
-            return mean_depth_encoder_loss
+            self.depth_encoder_optimizer.zero_grad()
+            depth_encoder_loss.backward()
+            nn.utils.clip_grad_norm_(self.depth_encoder.parameters(), self.max_grad_norm)
+            self.depth_encoder_optimizer.step()
+            return depth_encoder_loss.item()
 
     def update_depth_actor(self, actions_student_batch, actions_teacher_batch):
         if self.if_depth:
