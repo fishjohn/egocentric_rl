@@ -36,6 +36,9 @@ class BipedCfg(LeggedRobotCfg):
         dis_noise = 0.0
 
     class terrain(LeggedRobotCfg.terrain):
+        static_friction = 0.5
+        dynamic_friction = 0.5
+
         simplify_grid = False
         horizontal_scale_if_use_camera = 0.1
         terrain_proportions = [0.1, 0.1, 0.25, 0.25, 0.1, 0.2]
@@ -43,14 +46,6 @@ class BipedCfg(LeggedRobotCfg):
         measured_points_x = [-0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4,
                              0.5]  # 1mx1m rectangle (without center line)
         measured_points_y = [-0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4, 0.5]
-
-    #     measure_heights = True
-    #     measured_points_x = [-0.45, -0.3, -0.15, 0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1.05,
-    #                          1.2]  # 1mx1.6m rectangle (without center line)
-    #     measured_points_y = [-0.75, -0.6, -0.45, -0.3, -0.15, 0., 0.15, 0.3, 0.45, 0.6, 0.75]
-
-    #     mesh_type = 'plane'
-    #     measure_heights = False
 
     class init_state(LeggedRobotCfg.init_state):
         pos = [0.0, 0.0, 0.65]  # x,y,z [m]
@@ -63,6 +58,9 @@ class BipedCfg(LeggedRobotCfg):
             'hip_R_Joint': 0.0,
             'knee_R_Joint': 0.0
         }
+
+    class domain_rand(LeggedRobotCfg.domain_rand):
+        friction_range = [0., 2.]
 
     class control(LeggedRobotCfg.control):
         # PD Drive parameters:
@@ -95,7 +93,7 @@ class BipedCfg(LeggedRobotCfg):
             feet_air_time = 5.0
             dof_pos_limits = -1.
             no_fly = 0.25
-            feet_edge = -1.0
+            feet_edge = -1.0 * 0
 
     class commands(LeggedRobotCfg.commands):
         class ranges:
