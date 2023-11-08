@@ -21,6 +21,9 @@ class Biped(LeggedRobot):
 
     def __init__(self, cfg: LeggedRobotCfg, sim_params, physics_engine, sim_device, headless):
         super().__init__(cfg, sim_params, physics_engine, sim_device, headless)
+        self.last_dof_pos = torch.zeros_like(self.dof_pos)
+        self.last_dof_vel = torch.zeros_like(self.dof_vel)
+
         self.debug_viz = True
 
         self.resize_transform = torchvision.transforms.Resize((self.cfg.depth.resized[1], self.cfg.depth.resized[0]),
@@ -49,6 +52,7 @@ class Biped(LeggedRobot):
             if self.device == 'cpu':
                 self.gym.fetch_results(self.sim, True)
             self.gym.refresh_dof_state_tensor(self.sim)
+            self.compute_dof_vel()
         self.post_physics_step()
 
         self.global_counter += 1
@@ -64,6 +68,15 @@ class Biped(LeggedRobot):
         else:
             self.extras["depth"] = None
         return self.obs_buf, self.privileged_obs_buf, self.rew_buf, self.reset_buf, self.extras
+
+    def compute_dof_vel(self):
+        diff = self.dof_pos - self.last_dof_pos
+        self.dof_pos_dot = diff / self.sim_params.dt
+
+        if self.cfg.env.dof_vel_use_pos_diff:
+            self.dof_vel = self.dof_pos_dot
+
+        self.last_dof_pos[:] = self.dof_pos[:]
 
     def create_sim(self):
         """ Creates simulation, terrain and evironments
@@ -382,6 +395,10 @@ class Biped(LeggedRobot):
                 cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
                 cv2.imshow("Depth Image", self.depth_buffer[self.lookat_id, -1].cpu().numpy() + 0.5)
                 cv2.waitKey(1)
+
+    def reset_idx(self, env_ids):
+        self.last_dof_pos[env_ids] = self.dof_pos[env_ids]
+        super().reset_idx(env_ids)
 
     def _process_rigid_body_props(self, props, env_id):
         # No need to use tensors as only called upon env creation

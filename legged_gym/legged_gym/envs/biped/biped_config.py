@@ -13,6 +13,7 @@ class BipedCfg(LeggedRobotCfg):
         num_observations = n_proprio + n_scan + n_priv + n_priv_latent + history_len * n_proprio
         num_privileged_obs = None  # if not None a priviledge_obs_buf will be returned by step() (critic obs for assymetric training). None is returned otherwise
         num_actions = 6
+        dof_vel_use_pos_diff = True
 
     class depth:
         use_camera = False
