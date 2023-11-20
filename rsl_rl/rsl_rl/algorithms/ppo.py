@@ -132,6 +132,7 @@ class PPO:
             priv_states_estimated = self.estimator(obs_est[:, :self.num_prop])
             obs_est[:,
             self.num_prop + self.num_scan:self.num_prop + self.num_scan + self.priv_states_dim] = priv_states_estimated
+            self.transition.obs_est = obs_est
             self.transition.actions = self.actor_critic.act(obs_est, hist_encoding).detach()
         else:
             self.transition.actions = self.actor_critic.act(obs, hist_encoding).detach()
@@ -177,11 +178,15 @@ class PPO:
             generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         else:
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
-        for obs_batch, critic_obs_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
+        for obs_batch, critic_obs_batch, obs_est_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
                 old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch in generator:
 
-            self.actor_critic.act(obs_batch, masks=masks_batch,
-                                  hidden_states=hid_states_batch[0])  # match distribution dimension
+            if self.train_with_estimated_states:
+                self.actor_critic.act(obs_est_batch, masks=masks_batch,
+                                      hidden_states=hid_states_batch[0])
+            else:
+                self.actor_critic.act(obs_batch, masks=masks_batch,
+                                      hidden_states=hid_states_batch[0])
 
             actions_log_prob_batch = self.actor_critic.get_actions_log_prob(actions_batch)
             value_batch = self.actor_critic.evaluate(critic_obs_batch, masks=masks_batch,
@@ -282,11 +287,15 @@ class PPO:
             generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         else:
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
-        for obs_batch, critic_obs_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
+        for obs_batch, critic_obs_batch, obs_est_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
                 old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch in generator:
             with torch.inference_mode():
-                self.actor_critic.act(obs_batch, hist_encoding=True, masks=masks_batch,
-                                      hidden_states=hid_states_batch[0])
+                if self.train_with_estimated_states:
+                    self.actor_critic.act(obs_est_batch, masks=masks_batch,
+                                          hidden_states=hid_states_batch[0])
+                else:
+                    self.actor_critic.act(obs_batch, masks=masks_batch,
+                                          hidden_states=hid_states_batch[0])
 
             # Adaptation module update
             with torch.inference_mode():
