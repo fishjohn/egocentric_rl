@@ -4,7 +4,7 @@ from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobot
 class BipedCfg(LeggedRobotCfg):
     class env(LeggedRobotCfg.env):
         num_envs = 8192
-        n_scan = 121
+        n_scan = 165
         n_priv = 3 + 3 + 3
         n_priv_latent = 1 + 3 + 1 + 6 + 6  # [rand_mass, rand_com, friction_coeffs, motor_strength_kps, motor_strength_kds]
         n_proprio = 3 + 3 + 3 + 6 + 6 + 6 + 2
@@ -43,8 +43,7 @@ class BipedCfg(LeggedRobotCfg):
         horizontal_scale_if_use_camera = 0.1
         terrain_proportions = [0.1, 0.1, 0.25, 0.25, 0.1, 0.2]
 
-        measured_points_x = [-0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4,
-                             0.5]  # 1mx1m rectangle (without center line)
+        measured_points_x = [-0.5, -0.45, -0.4, -0.3, -0.2, -0.1, -0.05, 0., 0.05, 0.1, 0.2, 0.3, 0.4, 0.45, 0.5]
         measured_points_y = [-0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4, 0.5]
 
     class init_state(LeggedRobotCfg.init_state):

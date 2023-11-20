@@ -151,7 +151,7 @@ def play(args):
     checkpoint = args.checkpoint
 
     num_actions = 6
-    num_scan = 121
+    num_scan = 165
     n_priv_explicit = 3 + 3 + 3
     n_priv_latent = 1 + 3 + 1 + 6 + 6
     n_proprio = 3 + 3 + 3 + 6 + 6 + 6 + 2
