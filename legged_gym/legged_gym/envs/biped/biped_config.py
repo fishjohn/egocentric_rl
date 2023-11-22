@@ -5,7 +5,7 @@ class BipedCfg(LeggedRobotCfg):
     class env(LeggedRobotCfg.env):
         num_envs = 8192
         n_scan = 165
-        n_priv = 3 + 3 + 3
+        n_priv = 3
         n_priv_latent = 1 + 3 + 1 + 6 + 6  # [rand_mass, rand_com, friction_coeffs, motor_strength_kps, motor_strength_kds]
         n_proprio = 3 + 3 + 3 + 6 + 6 + 6 + 2
         history_len = 10
@@ -59,7 +59,7 @@ class BipedCfg(LeggedRobotCfg):
         }
 
     class domain_rand(LeggedRobotCfg.domain_rand):
-        friction_range = [0., 2.]
+        friction_range = [0.5, 2.]
 
     class control(LeggedRobotCfg.control):
         # PD Drive parameters:
@@ -110,6 +110,15 @@ class BipedCfgPPO(LeggedRobotCfgPPO):
 
     class algorithm(LeggedRobotCfgPPO.algorithm):
         entropy_coef = 0.01
+
+    class estimator:
+        train_with_estimated_states = True
+        learning_rate = 1.e-4
+        hidden_dims = [128, 64, 32]
+        priv_states_dim = BipedCfg.env.n_priv
+        num_prop = BipedCfg.env.n_proprio
+        num_scan = BipedCfg.env.n_scan
+        num_hist = BipedCfg.env.history_len
 
     class depth_encoder:
         if_depth = BipedCfg.depth.use_camera

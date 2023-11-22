@@ -136,6 +136,7 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
             env_cfg.env.num_envs = env_cfg.depth.camera_num_envs
             env_cfg.terrain.simplify_grid = True
             env_cfg.terrain.horizontal_scale = env_cfg.terrain.horizontal_scale_if_use_camera
+            env_cfg.commands.ranges.lin_vel_x[0] = 0.0
 
         # num envs
         if args.num_envs is not None:

@@ -282,9 +282,7 @@ class Biped(LeggedRobot):
             self.actions,
             self.contact_filt.float() - 0.5,
         ), dim=-1)
-        priv_explicit = torch.cat((self.base_lin_vel * self.obs_scales.lin_vel,
-                                   0 * self.base_lin_vel,
-                                   0 * self.base_lin_vel), dim=-1)
+        priv_explicit = self.base_lin_vel * self.obs_scales.lin_vel
         priv_latent = torch.cat((
             self.mass_params_tensor,
             self.friction_coeffs_tensor,

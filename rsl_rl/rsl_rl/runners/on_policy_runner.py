@@ -69,7 +69,7 @@ class OnPolicyRunner:
                                                       self.env.cfg.env.history_len,
                                                       self.env.num_actions,
                                                       **self.policy_cfg).to(self.device)
-        estimator = Estimator(input_dim=env.cfg.env.n_proprio, output_dim=env.cfg.env.n_priv,
+        estimator = Estimator(input_dim=env.cfg.env.n_proprio * env.cfg.env.history_len, output_dim=env.cfg.env.n_priv,
                               hidden_dims=self.estimator_cfg["hidden_dims"]).to(self.device)
 
         # Depth encoder

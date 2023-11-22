@@ -28,12 +28,13 @@
 #
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
-from legged_gym import LEGGED_GYM_ROOT_DIR, WANDB_SAVE_DIR
 import os
 
 import isaacgym
+from isaacgym.torch_utils import *
 from legged_gym.envs import *
 from legged_gym.utils import get_args, export_policy_as_jit, task_registry, Logger
+from legged_gym import LEGGED_GYM_ROOT_DIR, WANDB_SAVE_DIR
 
 import numpy as np
 import torch
@@ -62,6 +63,7 @@ def play(args):
     ppo_runner, train_cfg = task_registry.make_alg_runner(log_root=log_pth, env=env, name=args.task, args=args,
                                                           train_cfg=train_cfg)
     policy = ppo_runner.get_inference_policy(device=env.device)
+    estimator = ppo_runner.get_estimator_inference_policy(device=env.device)
 
     if env.cfg.depth.use_camera:
         depth_encoder = ppo_runner.get_depth_encoder_inference_policy(device=env.device)
@@ -75,7 +77,7 @@ def play(args):
     logger = Logger(env.dt)
     robot_index = 0  # which robot is used for logging
     joint_index = 1  # which joint is used for logging
-    stop_state_log = 100  # number of steps before plotting states
+    stop_state_log = 1000  # number of steps before plotting states
     stop_rew_log = env.max_episode_length + 1  # number of steps before print average episode rewards
     camera_position = np.array(env_cfg.viewer.pos, dtype=np.float64)
     camera_vel = np.array([1., 1., 0.])
@@ -94,10 +96,24 @@ def play(args):
         else:
             depth_latent = None
 
+        priv_states_estimated = estimator(obs[:, -env.cfg.env.n_proprio * env.cfg.env.history_len:])
+        obs[:,
+        env.cfg.env.n_proprio + env.cfg.env.n_scan:env.cfg.env.n_proprio + env.cfg.env.n_scan + env.cfg.env.n_priv] = priv_states_estimated
+
         if hasattr(ppo_runner.alg, "depth_actor"):
             actions = ppo_runner.alg.depth_actor(obs.detach(), hist_encoding=True, scandots_latent=depth_latent)
         else:
             actions = policy(obs.detach(), hist_encoding=True, scandots_latent=depth_latent)
+
+        env.commands[:, :] = to_torch(
+            [
+                env.command_ranges["lin_vel_x"][1] * 1.0,
+                env.command_ranges["lin_vel_y"][1] * 0.0,
+                0,
+                0
+            ],
+            device=env.device,
+        )
 
         obs, _, rews, dones, infos = env.step(actions.detach())
         if RECORD_FRAMES:

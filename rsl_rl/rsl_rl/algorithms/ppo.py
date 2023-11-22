@@ -98,6 +98,7 @@ class PPO:
         self.estimator = estimator
         self.priv_states_dim = estimator_paras["priv_states_dim"]
         self.num_prop = estimator_paras["num_prop"]
+        self.num_hist = estimator_paras["num_hist"]
         self.num_scan = estimator_paras["num_scan"]
         self.estimator_optimizer = optim.Adam(self.estimator.parameters(), lr=estimator_paras["learning_rate"])
         self.train_with_estimated_states = estimator_paras["train_with_estimated_states"]
@@ -129,7 +130,7 @@ class PPO:
         # Compute the actions and values, use proprio to compute estimated priv_states then actions, but store true priv_states
         if self.train_with_estimated_states:
             obs_est = obs.clone()
-            priv_states_estimated = self.estimator(obs_est[:, :self.num_prop])
+            priv_states_estimated = self.estimator(obs_est[:, -self.num_hist * self.num_prop:])
             obs_est[:,
             self.num_prop + self.num_scan:self.num_prop + self.num_scan + self.priv_states_dim] = priv_states_estimated
             self.transition.obs_est = obs_est
@@ -207,7 +208,7 @@ class PPO:
 
             # Estimator
             priv_states_predicted = self.estimator(
-                obs_batch[:, :self.num_prop])  # obs in batch is with true priv_states
+                obs_batch[:, -self.num_hist * self.num_prop:])  # obs in batch is with true priv_states
             estimator_loss = (priv_states_predicted - obs_batch[:,
                                                       self.num_prop + self.num_scan:self.num_prop + self.num_scan + self.priv_states_dim]).pow(
                 2).mean()

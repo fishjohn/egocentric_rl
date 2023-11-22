@@ -253,14 +253,6 @@ class LeggedRobotCfgPPO(BaseConfig):
         priv_reg_coef_schedual = [0, 0.1, 2000, 3000]
         priv_reg_coef_schedual_resume = [0, 0.1, 0, 1]
 
-    class estimator:
-        train_with_estimated_states = True
-        learning_rate = 1.e-4
-        hidden_dims = [128, 64]
-        priv_states_dim = LeggedRobotCfg.env.n_priv
-        num_prop = LeggedRobotCfg.env.n_proprio
-        num_scan = LeggedRobotCfg.env.n_scan
-
     class runner:
         policy_class_name = 'ActorCritic'
         algorithm_class_name = 'PPO'
