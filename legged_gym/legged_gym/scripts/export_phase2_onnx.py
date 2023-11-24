@@ -112,15 +112,16 @@ class HardwareVisionNN(nn.Module):
         self.actor = Actor(num_prop, num_scan, num_actions, scan_encoder_dims, actor_hidden_dims, priv_encoder_dims,
                            num_priv_latent, num_priv_explicit, num_hist, activation, tanh_encoder_output=tanh)
 
-        self.estimator = Estimator(input_dim=num_prop, output_dim=num_priv_explicit, hidden_dims=[128, 64])
+        self.estimator = Estimator(input_dim=num_prop * num_hist, output_dim=num_priv_explicit,
+                                   hidden_dims=[128, 64, 32])
 
     def forward(self, obs):
         depth_latent = obs[-32:]
         obs = obs[:self.num_obs]
         obs = obs.reshape(1, -1)
         depth_latent = depth_latent.reshape(1, -1)
-        # obs[:, self.num_prop + self.num_scan: self.num_prop + self.num_scan + self.num_priv_explicit] = self.estimator(
-        #     obs[:, :self.num_prop])
+        obs[:, self.num_prop + self.num_scan: self.num_prop + self.num_scan + self.num_priv_explicit] = self.estimator(
+            obs[:, -self.num_hist * self.num_prop:])
         return self.actor(obs, hist_encoding=True, eval=False, scandots_latent=depth_latent).squeeze()
         # return obs, depth_latent
 
@@ -152,7 +153,7 @@ def play(args):
 
     num_actions = 6
     num_scan = 165
-    n_priv_explicit = 3 + 3 + 3
+    n_priv_explicit = 3
     n_priv_latent = 1 + 3 + 1 + 6 + 6
     n_proprio = 3 + 3 + 3 + 6 + 6 + 6 + 2
     history_len = 10
