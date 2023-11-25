@@ -35,12 +35,9 @@
       </material>
     </visual>
     <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
+      <origin xyz="-0.04 0 0.09" rpy="0 0 0"/>
       <geometry>
-        <mesh
-          filename="../meshes/base_link.STL" />
+        <box size="0.2 0.3 0.15"/>
       </geometry>
     </collision>
   </link>
@@ -88,15 +85,12 @@
           rgba="0.79216 0.81961 0.93333 1" />
       </material>
     </visual>
-<!--    <collision>-->
-<!--      <origin-->
-<!--        xyz="0 0 0"-->
-<!--        rpy="0 0 0" />-->
-<!--      <geometry>-->
-<!--        <mesh-->
-<!--          filename="../meshes/abad_left_link.STL" />-->
-<!--      </geometry>-->
-<!--    </collision>-->
+    <collision>
+      <origin xyz="-0.08 0 0" rpy="1.57 0 0" />
+      <geometry>
+        <cylinder length="0.05" radius="0.05"/>
+      </geometry>
+    </collision>
   </link>
   <joint
     name="abad_L_Joint"
@@ -146,15 +140,12 @@
           rgba="0.79216 0.81961 0.93333 1" />
       </material>
     </visual>
-<!--    <collision>-->
-<!--      <origin-->
-<!--        xyz="0 0 0"-->
-<!--        rpy="0 0 0" />-->
-<!--      <geometry>-->
-<!--        <mesh-->
-<!--          filename="../meshes/hip_left_link.STL" />-->
-<!--      </geometry>-->
-<!--    </collision>-->
+    <collision>
+      <origin xyz="-0.10 -0.03 -0.14" rpy="0 0.53 0"/>
+      <geometry>
+        <cylinder length="0.15" radius="0.035"/>
+      </geometry>
+    </collision>
   </link>
   <joint
     name="hip_L_Joint"
@@ -205,12 +196,9 @@
       </material>
     </visual>
     <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
+      <origin xyz="0.078 0 -0.12" rpy="0 -0.55 0"/>
       <geometry>
-        <mesh
-          filename="../meshes/knee_left_link.STL" />
+        <cylinder length="0.26" radius="0.015"/>
       </geometry>
     </collision>
   </link>
@@ -263,12 +251,9 @@
       </material>
     </visual>
     <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
+      <origin xyz="0 0 0.035" rpy="0 0 0"/>
       <geometry>
-        <mesh
-          filename="../meshes/foot_left_link.STL" />
+        <sphere radius="0.035"/>
       </geometry>
     </collision>
   </link>
@@ -317,15 +302,12 @@
           rgba="0.79216 0.81961 0.93333 1" />
       </material>
     </visual>
-<!--    <collision>-->
-<!--      <origin-->
-<!--        xyz="0 0 0"-->
-<!--        rpy="0 0 0" />-->
-<!--      <geometry>-->
-<!--        <mesh-->
-<!--          filename="../meshes/abad_right_link.STL" />-->
-<!--      </geometry>-->
-<!--    </collision>-->
+    <collision>
+      <origin xyz="-0.08 0 0" rpy="1.57 0 0" />
+      <geometry>
+        <cylinder length="0.05" radius="0.05"/>
+      </geometry>
+    </collision>
   </link>
   <joint
     name="abad_R_Joint"
@@ -375,15 +357,12 @@
           rgba="1 0.98039 0.6 1" />
       </material>
     </visual>
-<!--    <collision>-->
-<!--      <origin-->
-<!--        xyz="0 0 0"-->
-<!--        rpy="0 0 0" />-->
-<!--      <geometry>-->
-<!--        <mesh-->
-<!--          filename="../meshes/hip_right_link.STL" />-->
-<!--      </geometry>-->
-<!--    </collision>-->
+    <collision>
+      <origin xyz="-0.10 0.03 -0.14" rpy="0 0.53 0"/>
+      <geometry>
+        <cylinder length="0.15" radius="0.035"/>
+      </geometry>
+    </collision>
   </link>
   <joint
     name="hip_R_Joint"
@@ -434,12 +413,9 @@
       </material>
     </visual>
     <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
+      <origin xyz="0.078 0 -0.12" rpy="0 -0.55 0"/>
       <geometry>
-        <mesh
-          filename="../meshes/knee_right_link.STL" />
+        <cylinder length="0.26" radius="0.015"/>
       </geometry>
     </collision>
   </link>
@@ -492,12 +468,9 @@
       </material>
     </visual>
     <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
+      <origin xyz="0 0 0.035" rpy="0 0 0"/>
       <geometry>
-        <mesh
-          filename="../meshes/foot_right_link.STL" />
+        <sphere radius="0.035"/>
       </geometry>
     </collision>
   </link>
